@@ -20,6 +20,7 @@ import { type StreamStatus } from '@/lib/audioStreaming';
 import { mediaStreamingService } from '@/lib/mediaStreaming';
 import { socketIOStreamingService } from '@/lib/socketIoStreaming';
 import AudioVisualizer from "@/components/audio/AudioVisualizer";
+import LiveStream from "@/components/LiveStream";
 
 type ChatMessage = {
   id: number;
@@ -557,17 +558,25 @@ export default function StreamPage() {
                   {streamLoading ? (
                     <Skeleton className="w-full h-full" />
                   ) : (
-                    <video 
-                      ref={videoRef}
-                      className="w-full h-full object-contain"
-                      controls
-                      autoPlay
-                      playsInline
-                      poster={displayedStream.thumbnailUrl || undefined}
-                    >
-                      <source src="" type="video/mp4" />
-                      Your browser does not support the video tag.
-                    </video>
+                    streamStatus.isLive ? (
+                      <LiveStream 
+                        initialStreamId={streamId?.toString()}
+                        userId={user?.id}
+                        userName={user?.displayName}
+                      />
+                    ) : (
+                      <video 
+                        ref={videoRef}
+                        className="w-full h-full object-contain"
+                        controls
+                        autoPlay
+                        playsInline
+                        poster={displayedStream.thumbnailUrl || undefined}
+                      >
+                        <source src="" type="video/mp4" />
+                        Your browser does not support the video tag.
+                      </video>
+                    )
                   )}
                 </div>
                 
