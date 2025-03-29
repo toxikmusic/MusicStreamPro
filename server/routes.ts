@@ -26,6 +26,15 @@ import { Server as SocketIOServer } from "socket.io";
 import { WebSocketServer, WebSocket } from "ws";
 import { db } from "./db";
 import { v4 as uuidv4 } from "uuid";
+import {
+  handleMasterPlaylist,
+  handleMediaPlaylist,
+  handleSegment,
+  createOrUpdateHLSPlaylist,
+  uploadSegment,
+  endHLSStream,
+  processWebRTCChunk
+} from "./hls";
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(process.cwd(), "uploads");
@@ -46,10 +55,19 @@ const storage_ = multer.diskStorage({
   }
 });
 
+// For regular file uploads (stored on disk)
 const upload = multer({ 
   storage: storage_,
   limits: {
     fileSize: 100 * 1024 * 1024 // 100MB limit
+  }
+});
+
+// For streaming segments (stored in memory)
+const memoryUpload = multer({ 
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 20 * 1024 * 1024 // 20MB limit for stream segments
   }
 });
 
@@ -501,6 +519,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     viewers: Set<string>;
     userId?: number;
     streamKey?: string;
+    hlsPlaylistUrl?: string;
+  }>();
+  
+  // Store active HLS streams with their IDs
+  const activeHLSStreams = new Map<string, { 
+    userId: number;
+    streamId: number;
+    streamKey: string;
+    hlsPlaylistUrl: string;
+    viewers: number;
   }>();
   
   // Setup Socket.IO for WebRTC streams
@@ -1175,6 +1203,164 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error deleting stream:", error);
       res.status(500).json({ message: "Failed to delete stream" });
+    }
+  });
+
+  // HLS Streaming Routes
+  
+  // Route to serve the master playlist (index.m3u8)
+  app.get("/hls/:streamId/master.m3u8", handleMasterPlaylist);
+  
+  // Route to serve the media playlist (playlist.m3u8)
+  app.get("/hls/:streamId/playlist.m3u8", handleMediaPlaylist);
+  
+  // Route to serve individual segments
+  app.get("/hls/:streamId/:segment", handleSegment);
+  
+  // Route to upload HLS segments (for direct uploads from broadcaster)
+  app.post("/api/streams/:streamId/segment", memoryUpload.single('segment'), uploadSegment);
+  
+  // Route to initialize HLS stream
+  app.post("/api/streams/:streamId/hls", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    
+    try {
+      const streamId = parseInt(req.params.streamId);
+      if (isNaN(streamId)) {
+        return res.status(400).json({ message: "Invalid stream ID" });
+      }
+      
+      // Get the stream
+      const stream = await storage.getStream(streamId);
+      if (!stream) {
+        return res.status(404).json({ message: "Stream not found" });
+      }
+      
+      // Check authorization (only stream owner can initialize HLS)
+      if (req.user.id !== stream.userId) {
+        return res.status(403).json({ message: "Not authorized to initialize this stream" });
+      }
+      
+      // Initialize HLS playlist without segment
+      const playlistUrl = await createOrUpdateHLSPlaylist(streamId, req.user.id);
+      
+      // Define segment URLs and paths
+      const segmentUrl = `/api/streams/${streamId}/segment`;
+      const hlsFolderPath = path.join(process.cwd(), 'uploads', 'hls', streamId.toString());
+      
+      // Update stream with HLS URL and other HLS info
+      await storage.updateStream(streamId, {
+        isLive: true,
+        hlsPlaylistUrl: playlistUrl,
+        hlsSegmentUrl: segmentUrl,
+        hlsFolderPath: hlsFolderPath
+      });
+      
+      res.json({
+        success: true,
+        streamId,
+        hlsPlaylistUrl: playlistUrl,
+        hlsSegmentUrl: segmentUrl
+      });
+    } catch (error) {
+      console.error("Error initializing HLS stream:", error);
+      res.status(500).json({ message: "Failed to initialize HLS stream" });
+    }
+  });
+  
+  // Route to end HLS stream and finalize recording
+  app.post("/api/streams/:streamId/hls/end", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    
+    try {
+      const streamId = parseInt(req.params.streamId);
+      if (isNaN(streamId)) {
+        return res.status(400).json({ message: "Invalid stream ID" });
+      }
+      
+      // End the HLS stream
+      await endHLSStream(streamId, req.user.id);
+      
+      // Update stream in database
+      await storage.updateStream(streamId, {
+        isLive: false,
+        endedAt: new Date()
+      });
+      
+      res.json({
+        success: true,
+        message: "Stream ended successfully"
+      });
+    } catch (error) {
+      console.error("Error ending HLS stream:", error);
+      res.status(500).json({ message: "Failed to end HLS stream" });
+    }
+  });
+  
+  // HLS version of the webrtc stream creation endpoint
+  app.post("/api/streams/hls", async (req, res) => {
+    try {
+      // Require authentication for creating streams
+      if (!req.isAuthenticated()) {
+        return res.status(401).json({ 
+          success: false, 
+          message: "Authentication required to create a stream" 
+        });
+      }
+      
+      const userId = req.user.id;
+      const userName = req.user.username || 'Anonymous';
+      
+      // Generate a unique stream key for secure broadcasting
+      const streamKey = generateStreamKey();
+      
+      // Create stream with the current user
+      const streamData = await storage.createStream({
+        userId,
+        title: req.body.title || `${userName}'s Stream`,
+        description: req.body.description || `Live stream by ${userName}`,
+        streamKey,
+        isLive: true, // Mark as live immediately
+        category: req.body.category || "Music", // Default category
+        tags: req.body.tags || ["live", "hls"]
+      });
+      
+      // Initialize HLS playlist
+      const playlistUrl = await createOrUpdateHLSPlaylist(streamData.id, userId);
+      
+      // Define segment URLs and paths
+      const segmentUrl = `/api/streams/${streamData.id}/segment`;
+      const hlsFolderPath = path.join(process.cwd(), 'uploads', 'hls', streamData.id.toString());
+      
+      // Update stream with HLS URL and other HLS info
+      await storage.updateStream(streamData.id, {
+        hlsPlaylistUrl: playlistUrl,
+        hlsSegmentUrl: segmentUrl,
+        hlsFolderPath: hlsFolderPath
+      });
+      
+      // Update user's streaming status
+      await storage.updateUser(userId, { isStreaming: true });
+      
+      return res.status(201).json({
+        success: true,
+        streamId: streamData.id,
+        streamKey, // Only sent to the creator
+        hlsPlaylistUrl: playlistUrl,
+        hlsSegmentUrl: segmentUrl,
+        shareUrl: `${req.protocol}://${req.get("host")}/stream/${streamData.id}`
+      });
+    } catch (error) {
+      console.error("Error creating HLS stream:", error);
+      res.status(500).json({ 
+        success: false,
+        message: "Failed to create stream", 
+        error: (error as Error).message 
+      });
     }
   });
 

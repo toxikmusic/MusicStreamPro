@@ -62,7 +62,13 @@ export const streams = pgTable("streams", {
   startedAt: timestamp("started_at").defaultNow(),
   endedAt: timestamp("ended_at"),
   category: text("category"),
-  tags: text("tags").array()
+  tags: text("tags").array(),
+  hlsPlaylistUrl: text("hls_playlist_url"), // M3U8 playlist URL
+  hlsSegmentUrl: text("hls_segment_url"), // Base URL for uploading segments
+  hlsFolderPath: text("hls_folder_path"), // Server-side folder where segments are stored
+  hasRecording: boolean("has_recording").default(false), // Whether the stream has a VOD recording
+  recordingUrl: text("recording_url"), // URL to the VOD recording if available
+  peakViewerCount: integer("peak_viewer_count").default(0) // Track peak concurrent viewers
 });
 
 export const insertStreamSchema = createInsertSchema(streams).pick({
@@ -73,7 +79,12 @@ export const insertStreamSchema = createInsertSchema(streams).pick({
   streamKey: true,
   category: true,
   tags: true,
-  isLive: true
+  isLive: true,
+  hlsPlaylistUrl: true,
+  hlsSegmentUrl: true,
+  hlsFolderPath: true,
+  hasRecording: true,
+  recordingUrl: true
 });
 
 // Track model

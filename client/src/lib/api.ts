@@ -123,6 +123,90 @@ export async function endStream(streamId: number): Promise<{ success: boolean }>
   });
 }
 
+// HLS Specific APIs
+
+// Create an HLS stream
+export async function createHLSStream(data: {
+  title?: string;
+  description?: string;
+  category?: string;
+  tags?: string[];
+}): Promise<{
+  success: boolean;
+  streamId: number;
+  streamKey: string;
+  hlsPlaylistUrl: string;
+  shareUrl: string;
+}> {
+  return await apiRequest<any>('/api/streams/hls', {
+    method: "POST",
+    body: data
+  });
+}
+
+// Initialize HLS on an existing stream
+export async function initializeHLSStream(streamId: number): Promise<{
+  success: boolean;
+  streamId: number;
+  hlsPlaylistUrl: string;
+}> {
+  return await apiRequest<any>(`/api/streams/${streamId}/hls`, {
+    method: "POST"
+  });
+}
+
+// End an HLS stream
+export async function endHLSStream(streamId: number): Promise<{
+  success: boolean;
+  message: string;
+}> {
+  return await apiRequest<any>(`/api/streams/${streamId}/hls/end`, {
+    method: "POST"
+  });
+}
+
+// Upload an HLS segment
+export async function uploadHLSSegment(streamId: number, segmentData: Blob): Promise<{
+  success: boolean;
+  playlistUrl: string;
+}> {
+  try {
+    console.log(`API: Uploading segment for stream ${streamId}, size: ${segmentData.size} bytes`);
+    
+    const formData = new FormData();
+    formData.append('segment', segmentData);
+    
+    const response = await fetch(`/api/streams/${streamId}/segment`, {
+      method: 'POST',
+      body: formData,
+      credentials: 'include'
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      let errorData;
+      try {
+        // Try to parse as JSON
+        errorData = JSON.parse(errorText);
+      } catch (e) {
+        // If it's not valid JSON, use the text directly
+        console.error('API: Server returned non-JSON error:', errorText);
+        throw new Error(`Server error: ${response.status} ${response.statusText}`);
+      }
+      
+      console.error('API: Failed to upload segment:', errorData);
+      throw new Error(errorData.error || 'Failed to upload segment');
+    }
+    
+    const result = await response.json();
+    console.log('API: Segment upload successful:', result);
+    return result;
+  } catch (error) {
+    console.error('API: Segment upload exception:', error);
+    throw error;
+  }
+}
+
 // Creators
 export async function getRecommendedCreators(): Promise<User[]> {
   return await apiRequest<User[]>("/api/creators/recommended");
