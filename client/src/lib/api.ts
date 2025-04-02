@@ -142,6 +142,7 @@ export async function createHLSStream(data: {
   description?: string;
   category?: string;
   tags?: string[];
+  createShareableUrl?: boolean;
 }): Promise<{
   success: boolean;
   streamId: number;

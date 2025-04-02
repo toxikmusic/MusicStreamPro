@@ -1,10 +1,12 @@
 import { createHLSStream, initializeHLSStream, endHLSStream, uploadHLSSegment } from './api';
+import type { User } from "@shared/schema";
 
 interface HLSStreamingOptions {
   title?: string;
   description?: string;
   category?: string;
   tags?: string[];
+  createShareableUrl?: boolean;  // Whether to create a shareable URL
   onStreamCreated?: (streamData: any) => void;
   onSegmentUploaded?: (response: any) => void;
   onStreamEnded?: (response: any) => void;
@@ -45,7 +47,8 @@ export class HLSStreamingSession {
         title: this.options.title,
         description: this.options.description,
         category: this.options.category || "Music",
-        tags: this.options.tags || ["live", "hls"]
+        tags: this.options.tags || ["live", "hls"],
+        createShareableUrl: this.options.createShareableUrl
       });
       
       console.log("HLS: Stream created:", streamResponse);

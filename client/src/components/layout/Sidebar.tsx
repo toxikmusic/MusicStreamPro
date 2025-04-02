@@ -7,11 +7,11 @@ import { User, Genre } from "@shared/schema";
 export default function Sidebar() {
   // Mock data for initial render
   const followedChannels = [
-    { id: 1, username: "djshadow", displayName: "DJ Shadow", profileImageUrl: "https://images.unsplash.com/photo-1508700115892-45ecd05ae2ad", isStreaming: true, streamTitle: "Late night beats" },
-    { id: 2, username: "basstheory", displayName: "Bass Theory", profileImageUrl: "https://images.unsplash.com/photo-1487180144351-b8472da7d491", isStreaming: false },
-    { id: 3, username: "melodichouse", displayName: "Melodic House", profileImageUrl: "https://images.unsplash.com/photo-1614680376408-81e91ffe3db7", isStreaming: true, streamTitle: "Studio session" },
+    { id: 1, username: "dj_vibe", displayName: "DJ Vibe", profileImageUrl: "", isStreaming: true },
+    { id: 2, username: "music_lover", displayName: "Music Lover", profileImageUrl: "", isStreaming: false },
+    { id: 3, username: "beatmaker", displayName: "Beat Maker", profileImageUrl: "", isStreaming: false },
   ];
-
+  
   const genres = [
     { id: 1, name: "Electronic" },
     { id: 2, name: "Hip Hop" },

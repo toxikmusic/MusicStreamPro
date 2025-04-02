@@ -706,12 +706,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         const streamData = await storage.createStream({
           userId,
-          title: `${userName}'s Stream`,
-          description: `Live stream by ${userName}`,
+          title: req.body.title || `${userName}'s Stream`,
+          description: req.body.description || `Live stream by ${userName}`,
           streamKey: streamKey,
           isLive: true, // Mark as live immediately
-          category: "Music", // Default category
-          tags: ["live", "webrtc"]
+          category: req.body.category || "Music", // Default category
+          tags: req.body.tags || ["live", "webrtc"]
         });
         
         console.log(`Saved stream ${streamId} to database with ID ${streamData.id}`);
@@ -723,13 +723,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const streamIdMapping = new Map();
         streamIdMapping.set(streamId, streamData.id);
         
-        return res.json({
+        // Create response with stream data
+        const response = {
           success: true,
           streamId,
           dbStreamId: streamData.id,
           streamKey: streamKey, // Only sent to the creator
           shareUrl: `${req.protocol}://${req.get("host")}/stream/${streamId}`
-        });
+        };
+        
+        // If createShareableUrl was requested, create a temporary shareable URL
+        if (req.body.createShareableUrl) {
+          console.log("Creating shareable URL for WebRTC stream", streamId);
+          
+          // We already have the share URL constructed above
+          // You could add additional metadata or tracking here if needed
+        }
+        
+        return res.json(response);
       } catch (dbError) {
         console.error("Failed to save stream to database:", dbError);
         
@@ -1346,14 +1357,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Update user's streaming status
       await storage.updateUser(userId, { isStreaming: true });
       
-      return res.status(201).json({
+      // Create a response with the stream data
+      const response = {
         success: true,
         streamId: streamData.id,
         streamKey, // Only sent to the creator
         hlsPlaylistUrl: playlistUrl,
         hlsSegmentUrl: segmentUrl,
         shareUrl: `${req.protocol}://${req.get("host")}/stream/${streamData.id}`
-      });
+      };
+      
+      // If createShareableUrl was requested, create a temporary shareable URL
+      if (req.body.createShareableUrl) {
+        console.log("Creating shareable URL for stream", streamData.id);
+        
+        // We already have the share URL constructed above
+        // You could add additional metadata or tracking here if needed
+      }
+      
+      return res.status(201).json(response);
     } catch (error) {
       console.error("Error creating HLS stream:", error);
       res.status(500).json({ 

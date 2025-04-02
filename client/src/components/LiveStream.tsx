@@ -41,6 +41,7 @@ const LiveStream = ({ initialStreamId, userId, userName }: LiveStreamProps) => {
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [streamKey, setStreamKey] = useState("");
+  const [audioSource, setAudioSource] = useState<"microphone" | "system">("microphone");
   const [availableDevices, setAvailableDevices] = useState<{
     videoDevices: MediaDeviceInfo[];
     audioDevices: MediaDeviceInfo[];
@@ -558,18 +559,68 @@ const LiveStream = ({ initialStreamId, userId, userName }: LiveStreamProps) => {
   // Host stream creation function
   const createStream = async () => {
     try {
-      // First get access to the media devices
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: videoEnabled ? { deviceId: selectedVideoDevice ? { exact: selectedVideoDevice } : undefined } : false,
-        audio: audioEnabled ? { deviceId: selectedAudioDevice ? { exact: selectedAudioDevice } : undefined } : false
-      });
+      let stream: MediaStream;
+      
+      // Handle different audio sources
+      if (audioSource === "system" && audioEnabled) {
+        // Use getDisplayMedia to capture system audio
+        try {
+          console.log("Attempting to capture system audio...");
+          const displayStream = await navigator.mediaDevices.getDisplayMedia({
+            video: videoEnabled,
+            audio: true
+          });
+          
+          if (videoEnabled) {
+            // If video is enabled, use the display capture for both video and audio
+            stream = displayStream;
+          } else {
+            // If video is not enabled, we only need the audio tracks from display capture
+            stream = new MediaStream();
+            // Add only audio tracks from display capture
+            displayStream.getAudioTracks().forEach(track => {
+              stream.addTrack(track);
+            });
+            // Clean up video tracks we don't need
+            displayStream.getVideoTracks().forEach(track => track.stop());
+          }
+          
+          toast({
+            title: "System Audio",
+            description: "Capturing system audio. Ensure you've selected 'Share audio' in the browser dialog.",
+          });
+        } catch (error) {
+          console.error("Error capturing system audio:", error);
+          toast({
+            title: "System Audio Error",
+            description: "Failed to capture system audio. Falling back to microphone.",
+            variant: "destructive"
+          });
+          // Fall back to microphone if system audio fails
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: videoEnabled ? { deviceId: selectedVideoDevice ? { exact: selectedVideoDevice } : undefined } : false,
+            audio: audioEnabled ? { deviceId: selectedAudioDevice ? { exact: selectedAudioDevice } : undefined } : false
+          });
+        }
+      } else {
+        // Standard microphone and camera capture
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: videoEnabled ? { deviceId: selectedVideoDevice ? { exact: selectedVideoDevice } : undefined } : false,
+          audio: audioEnabled ? { deviceId: selectedAudioDevice ? { exact: selectedAudioDevice } : undefined } : false
+        });
+      }
       
       // Store the local stream for later use
       localStreamRef.current = stream;
       
-      // Display the local video feed
+      // Display the local video feed if video is enabled
       if (localVideoRef.current) {
-        localVideoRef.current.srcObject = stream;
+        if (videoEnabled) {
+          localVideoRef.current.srcObject = stream;
+        } else {
+          // If no video, show a placeholder or hide the video element
+          localVideoRef.current.srcObject = null;
+        }
       }
       
       let streamData;
@@ -584,7 +635,11 @@ const LiveStream = ({ initialStreamId, userId, userName }: LiveStreamProps) => {
           },
           body: JSON.stringify({
             userId,
-            userName: userName || 'Anonymous'
+            userName: userName || 'Anonymous',
+            title: `${userName || 'Anonymous'}'s Stream`,
+            description: `Live stream by ${userName || 'Anonymous'}`,
+            // Include metadata for shareable URL
+            createShareableUrl: true
           })
         });
         
@@ -593,6 +648,10 @@ const LiveStream = ({ initialStreamId, userId, userName }: LiveStreamProps) => {
         if (!streamData.success) {
           throw new Error(streamData.message || "Failed to create WebRTC stream");
         }
+        
+        // Generate shareable URL from the stream ID
+        const shareableUrl = `${window.location.origin}/stream/${streamData.streamId}`;
+        streamData.shareUrl = shareableUrl;
         
         // Emit host-stream event to WebSocket server for WebRTC
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -611,6 +670,8 @@ const LiveStream = ({ initialStreamId, userId, userName }: LiveStreamProps) => {
           description: `Live stream by ${userName || 'Anonymous'}`,
           category: "Music",
           tags: ["live", "hls"],
+          // Include metadata for shareable URL
+          createShareableUrl: true,
           onStreamCreated: (data) => {
             console.log("HLS stream created:", data);
             // Update UI with stream URL
@@ -635,10 +696,13 @@ const LiveStream = ({ initialStreamId, userId, userName }: LiveStreamProps) => {
         // Start the HLS stream
         const hlsStream = await hlsSessionRef.current.startStream(stream);
         
+        // Generate shareable URL from the stream ID
+        const shareableUrl = `${window.location.origin}/stream/${hlsStream.streamId}`;
+        
         streamData = {
           success: true,
           streamId: hlsStream.streamId.toString(),
-          shareUrl: hlsStream.shareUrl
+          shareUrl: shareableUrl || hlsStream.shareUrl
         };
       } else {
         throw new Error("Invalid streaming protocol selected");
@@ -1165,6 +1229,42 @@ const LiveStream = ({ initialStreamId, userId, userName }: LiveStreamProps) => {
                         )}
                       </SelectContent>
                     </Select>
+                  </div>
+                  
+                  <div className="md:col-span-2">
+                    <Label className="text-xs mb-2 block">
+                      Audio Source
+                    </Label>
+                    <div className="flex items-center justify-start space-x-4 mb-4">
+                      <div className="flex items-center space-x-2">
+                        <input 
+                          type="radio" 
+                          id="mic-source" 
+                          name="audio-source" 
+                          checked={audioSource === "microphone"} 
+                          onChange={() => setAudioSource("microphone")}
+                          disabled={isStreaming}
+                        />
+                        <Label htmlFor="mic-source" className="cursor-pointer">
+                          <Mic className="h-4 w-4 inline mr-1" />
+                          Microphone
+                        </Label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <input 
+                          type="radio" 
+                          id="system-source" 
+                          name="audio-source" 
+                          checked={audioSource === "system"} 
+                          onChange={() => setAudioSource("system")}
+                          disabled={isStreaming}
+                        />
+                        <Label htmlFor="system-source" className="cursor-pointer">
+                          <Monitor className="h-4 w-4 inline mr-1" />
+                          System Audio
+                        </Label>
+                      </div>
+                    </div>
                   </div>
                   
                   <div className="md:col-span-2">
