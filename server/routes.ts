@@ -1,4 +1,4 @@
-import type { Express, Request, Response, NextFunction } from "express";
+import express, { type Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { z } from "zod";
@@ -97,6 +97,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   // Handle authentication for APIs (using passport.js)
   setupAuth(app);
+  
+  // Serve static files from the uploads directory
+  app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
   // Initialize WebSocket server for chat
   const wss = new WebSocketServer({ noServer: true });
@@ -855,15 +858,50 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/streams/:id", async (req, res) => {
     const streamId = parseInt(req.params.id);
     if (isNaN(streamId)) {
-      return res.status(400).json({ message: "Invalid stream ID" });
+      return res.status(400).json({ success: false, message: "Invalid stream ID" });
     }
 
-    const stream = await storage.getStream(streamId);
-    if (!stream) {
-      return res.status(404).json({ message: "Stream not found" });
+    try {
+      // First check in-memory streams for active ones
+      const inMemoryExists = activeStreams.has(streamId.toString()) || webrtcActiveStreams.has(streamId.toString());
+      
+      // Get stream from database
+      const dbStream = await storage.getStream(streamId);
+      
+      if (!dbStream && !inMemoryExists) {
+        return res.status(404).json({ success: false, message: "Stream not found" });
+      }
+      
+      // If stream exists in memory and/or database, return details
+      const streamData = dbStream || {};
+      const isActive = inMemoryExists;
+      
+      // Check for visual element
+      let visualElementInfo = {};
+      if (dbStream && dbStream.visualElementUrl) {
+        visualElementInfo = {
+          hasVisualElement: true,
+          visualElementUrl: dbStream.visualElementUrl,
+          visualElementType: dbStream.visualElementType || 'image'
+        };
+      }
+      
+      res.json({ 
+        success: true, 
+        stream: {
+          ...streamData,
+          streamType: dbStream?.streamType || 'video',
+          isActive,
+          ...visualElementInfo,
+          protocol: webrtcActiveStreams.has(streamId.toString()) ? 'webrtc' : 
+                   activeStreams.has(streamId.toString()) ? 'hls' : 
+                   (dbStream as any)?.protocol || 'webrtc'
+        }
+      });
+    } catch (error) {
+      console.error("Error fetching stream details:", error);
+      res.status(500).json({ success: false, message: "Failed to fetch stream details" });
     }
-
-    res.json(stream);
   });
 
   app.post("/api/streams", async (req, res) => {
@@ -875,6 +913,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const streamSchema = insertStreamSchema.extend({
       title: z.string().min(3).max(100),
       description: z.string().max(2000).optional(),
+      streamType: z.enum(["video", "audio"]).default("video"),
+      useCamera: z.boolean().default(true),
+      useMicrophone: z.boolean().default(true),
+      useSystemAudio: z.boolean().default(false),
+      hasVisualElement: z.boolean().default(false)
     });
 
     try {
@@ -1230,6 +1273,85 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   // Route to upload HLS segments (for direct uploads from broadcaster)
   app.post("/api/streams/:streamId/segment", memoryUpload.single('segment'), uploadSegment);
+  
+  // Handle visual element upload for audio streams
+  const visualStorage = multer.diskStorage({
+    destination: (req, file, cb) => {
+      const uploadsDir = path.join(process.cwd(), 'uploads/visual-elements');
+      if (!fs.existsSync(uploadsDir)) {
+        fs.mkdirSync(uploadsDir, { recursive: true });
+      }
+      cb(null, uploadsDir);
+    },
+    filename: (req, file, cb) => {
+      const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+      const ext = path.extname(file.originalname);
+      cb(null, `visual-${uniqueSuffix}${ext}`);
+    }
+  });
+  
+  const visualUpload = multer({ 
+    storage: visualStorage,
+    limits: {
+      fileSize: 10 * 1024 * 1024, // 10MB limit
+    },
+    fileFilter: (req, file, cb) => {
+      // Accept only images and videos
+      if (file.mimetype.startsWith('image/') || file.mimetype.startsWith('video/')) {
+        cb(null, true);
+      } else {
+        cb(new Error('Only images and videos are allowed'));
+      }
+    }
+  });
+  
+  app.post("/api/streams/:id/visual-element", visualUpload.single('visualElement'), async (req, res) => {
+    if (!req.isAuthenticated()) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    
+    const streamId = parseInt(req.params.id);
+    
+    try {
+      // Check if stream exists and belongs to the user
+      const stream = await storage.getStream(streamId);
+      
+      if (!stream) {
+        return res.status(404).json({ message: "Stream not found" });
+      }
+      
+      if (stream.userId !== req.user.id) {
+        return res.status(403).json({ message: "You don't have permission to modify this stream" });
+      }
+      
+      if (!req.file) {
+        return res.status(400).json({ message: "No file uploaded" });
+      }
+      
+      // Get file info
+      const file = req.file;
+      const visualElementType = file.mimetype.startsWith('image/') ? 'image' : 'video';
+      
+      // Create URL path for the file
+      const baseUrl = process.env.BASE_URL || `${req.protocol}://${req.get('host')}`;
+      const visualElementUrl = `${baseUrl}/uploads/visual-elements/${file.filename}`;
+      
+      // Update stream with visual element information
+      const updatedStream = await storage.updateStream(streamId, {
+        hasVisualElement: true,
+        visualElementType,
+        visualElementUrl
+      });
+      
+      res.status(200).json({
+        message: "Visual element uploaded successfully",
+        stream: updatedStream
+      });
+    } catch (error) {
+      console.error("Error uploading visual element:", error);
+      res.status(500).json({ message: "Failed to upload visual element" });
+    }
+  });
   
   // Route to initialize HLS stream
   app.post("/api/streams/:streamId/hls", async (req, res) => {

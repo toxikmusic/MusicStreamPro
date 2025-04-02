@@ -35,6 +35,14 @@ const LiveStream = ({ initialStreamId, userId, userName }: LiveStreamProps) => {
   const [viewerCount, setViewerCount] = useState(0);
   const [streamProtocol, setStreamProtocol] = useState<"webrtc" | "hls">("webrtc"); // Default to WebRTC
   
+  // Stream details
+  const [streamDetails, setStreamDetails] = useState<{
+    streamType?: "video" | "audio";
+    hasVisualElement?: boolean;
+    visualElementUrl?: string;
+    visualElementType?: "image" | "video";
+  }>({});
+  
   // Media device states
   const [videoEnabled, setVideoEnabled] = useState(true);
   const [audioEnabled, setAudioEnabled] = useState(true);
@@ -73,8 +81,19 @@ const LiveStream = ({ initialStreamId, userId, userName }: LiveStreamProps) => {
   const setupWebSocket = () => {
     // Create a WebSocket connection for signaling
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    
+    // Log environment info to debug WebSocket connection issues
+    const isReplit = window.location.hostname.includes('.replit.dev') || 
+                    window.location.hostname.includes('.repl.co');
+    console.log("Chat WebSocket environment info:", {
+      isReplit,
+      hostname: window.location.hostname,
+      protocol: wsProtocol,
+      host: window.location.host
+    });
+    
     const wsURL = `${wsProtocol}//${window.location.host}/ws`;
-    console.log("Connecting to WebSocket server for WebRTC signaling at:", wsURL);
+    console.log("Connecting to chat WebSocket:", wsURL);
     
     // Close any existing connection
     if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
@@ -439,18 +458,58 @@ const LiveStream = ({ initialStreamId, userId, userName }: LiveStreamProps) => {
   
   // Auto-join stream when initialStreamId is provided
   useEffect(() => {
-    if (initialStreamId && mode === "viewer" && wsRef.current && wsRef.current.readyState === WebSocket.OPEN && !isStreaming) {
-      // Automatically join the stream
-      wsRef.current.send(JSON.stringify({
-        type: "join-stream",
-        data: { streamId: initialStreamId }
-      }));
-      setIsStreaming(true);
+    if (initialStreamId && mode === "viewer" && !isStreaming) {
+      // Fetch stream details first
+      const fetchStreamDetails = async () => {
+        try {
+          const response = await fetch(`${window.location.origin}/api/streams/${initialStreamId}`);
+          const data = await response.json();
+          
+          if (data.success && data.stream) {
+            // Set stream details
+            setStreamDetails({
+              streamType: data.stream.streamType,
+              hasVisualElement: !!data.stream.visualElementUrl,
+              visualElementUrl: data.stream.visualElementUrl,
+              visualElementType: data.stream.visualElementType || 'image'
+            });
+            
+            // Set protocol based on stream type if available
+            if (data.stream.protocol) {
+              setStreamProtocol(data.stream.protocol);
+            }
+            
+            // Join the stream if WebSocket is ready
+            if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+              wsRef.current.send(JSON.stringify({
+                type: "join-stream",
+                data: { streamId: initialStreamId }
+              }));
+              setIsStreaming(true);
+              
+              toast({
+                title: "Joining Stream",
+                description: "Connecting to the stream...",
+              });
+            }
+          } else {
+            toast({
+              title: "Stream Not Found",
+              description: "The stream you're trying to join doesn't exist or has ended",
+              variant: "destructive"
+            });
+          }
+        } catch (error) {
+          console.error("Error fetching stream details:", error);
+          toast({
+            title: "Error",
+            description: "Failed to get stream details. Please try again.",
+            variant: "destructive"
+          });
+        }
+      };
       
-      toast({
-        title: "Joining Stream",
-        description: "Connecting to the stream...",
-      });
+      fetchStreamDetails();
     }
   }, [initialStreamId, mode, isStreaming, toast]);
 
@@ -743,7 +802,7 @@ const LiveStream = ({ initialStreamId, userId, userName }: LiveStreamProps) => {
     
     // Check if the stream exists first
     try {
-      const response = await fetch(`${window.location.origin}/api/streams/webrtc/${streamId}`);
+      const response = await fetch(`${window.location.origin}/api/streams/${streamId}`);
       const data = await response.json();
       
       if (!data.success) {
@@ -753,6 +812,21 @@ const LiveStream = ({ initialStreamId, userId, userName }: LiveStreamProps) => {
           variant: "destructive"
         });
         return;
+      }
+      
+      // Store stream details if available
+      if (data.stream) {
+        setStreamDetails({
+          streamType: data.stream.streamType,
+          hasVisualElement: !!data.stream.visualElementUrl,
+          visualElementUrl: data.stream.visualElementUrl,
+          visualElementType: data.stream.visualElementType
+        });
+        
+        // Set protocol based on stream type if available
+        if (data.stream.protocol) {
+          setStreamProtocol(data.stream.protocol);
+        }
       }
       
       // Stream exists, join it
@@ -1451,6 +1525,34 @@ const LiveStream = ({ initialStreamId, userId, userName }: LiveStreamProps) => {
                       </Button>
                     </div>
                   </div>
+                </div>
+              ) : streamDetails.streamType === "audio" && streamDetails.hasVisualElement ? (
+                <div className="relative w-full h-full flex items-center justify-center">
+                  {/* Display visual element for audio stream */}
+                  {streamDetails.visualElementType === "image" ? (
+                    <img 
+                      src={streamDetails.visualElementUrl} 
+                      alt="Stream visual" 
+                      className="max-w-full max-h-full object-contain"
+                    />
+                  ) : (
+                    <video
+                      src={streamDetails.visualElementUrl}
+                      autoPlay
+                      loop
+                      muted
+                      playsInline
+                      className="max-w-full max-h-full object-contain"
+                    />
+                  )}
+                  
+                  {/* Audio element for audio streams */}
+                  <audio
+                    ref={remoteVideoRef as React.RefObject<HTMLAudioElement>}
+                    autoPlay
+                    playsInline
+                    className="hidden"
+                  />
                 </div>
               ) : (
                 <video

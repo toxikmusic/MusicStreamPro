@@ -103,14 +103,25 @@ export async function getActiveStreamsByUser(userId: number): Promise<Stream[]> 
   return streams.filter(stream => stream.isLive);
 }
 
-export async function createStream(data: Partial<Stream>): Promise<Stream> {
+export async function createStream(data: Partial<Stream> & {
+  useCamera?: boolean;
+  useMicrophone?: boolean;
+  useSystemAudio?: boolean;
+  streamType?: "video" | "audio";
+  hasVisualElement?: boolean;
+}): Promise<Stream> {
   // Get current user ID from authentication
   const user = await apiRequest<User>("/api/user");
   
   // Add userId to stream data
   const streamData = {
     ...data,
-    userId: user.id
+    userId: user.id,
+    streamType: data.streamType || "video",
+    useCamera: data.streamType === "audio" ? false : (data.useCamera ?? true),
+    useMicrophone: data.useMicrophone ?? true,
+    useSystemAudio: data.useSystemAudio ?? false,
+    hasVisualElement: data.hasVisualElement ?? false
   };
   
   console.log("Creating stream with data:", streamData);
@@ -119,6 +130,48 @@ export async function createStream(data: Partial<Stream>): Promise<Stream> {
     method: "POST",
     body: streamData
   });
+}
+
+// Upload a visual element for an audio stream
+export async function uploadVisualElement(streamId: number, file: File): Promise<{
+  message: string;
+  stream: Stream;
+}> {
+  try {
+    console.log(`API: Uploading visual element for stream ${streamId}, type: ${file.type}, size: ${file.size} bytes`);
+    
+    const formData = new FormData();
+    formData.append('visualElement', file);
+    
+    const response = await fetch(`/api/streams/${streamId}/visual-element`, {
+      method: 'POST',
+      body: formData,
+      credentials: 'include'
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      let errorData;
+      try {
+        // Try to parse as JSON
+        errorData = JSON.parse(errorText);
+      } catch (e) {
+        // If it's not valid JSON, use the text directly
+        console.error('API: Server returned non-JSON error:', errorText);
+        throw new Error(`Server error: ${response.status} ${response.statusText}`);
+      }
+      
+      console.error('API: Failed to upload visual element:', errorData);
+      throw new Error(errorData.error || 'Failed to upload visual element');
+    }
+    
+    const result = await response.json();
+    console.log('API: Visual element upload successful:', result);
+    return result;
+  } catch (error) {
+    console.error('API: Visual element upload exception:', error);
+    throw error;
+  }
 }
 
 export async function deleteStream(streamId: number): Promise<{ success: boolean }> {

@@ -62,7 +62,7 @@ export default function StreamPage() {
   // Stream data is now fetched from the API using React Query
   
   // Query for stream data
-  const { data: stream, isLoading: streamLoading } = useQuery<Stream>({
+  const { data: stream, isLoading: streamLoading, isError: streamError } = useQuery<Stream>({
     queryKey: ['/api/streams', streamId],
     enabled: !!streamId
   });
@@ -72,6 +72,17 @@ export default function StreamPage() {
     queryKey: ['/api/users', stream?.userId],
     enabled: !!stream?.userId
   });
+  
+  // Show a toast when stream doesn't exist
+  useEffect(() => {
+    if (streamError) {
+      toast({
+        title: "Stream not found",
+        description: "The stream you're looking for doesn't exist or has ended.",
+        variant: "default",
+      });
+    }
+  }, [streamError, toast]);
   
   // Draw audio visualization using canvas
   const drawVisualization = (data: Uint8Array) => {
@@ -239,6 +250,12 @@ export default function StreamPage() {
   useEffect(() => {
     if (!streamId) return;
     
+    // Don't try to connect if we know the stream doesn't exist or isn't live
+    if (stream && !stream.isLive) {
+      console.log("Stream exists but isn't live - not connecting to WebSocket");
+      return;
+    }
+    
     // Set up audio stream visualization
     const setupAudioVisualizer = async () => {
       try {
@@ -374,10 +391,13 @@ export default function StreamPage() {
         // Handle connection close
         audioSocket.onclose = () => {
           setIsAudioConnected(false);
-          toast({
-            title: "Audio stream ended",
-            description: "The broadcaster has ended the stream.",
-          });
+          // Only show toast if we were previously connected
+          if (isAudioConnected) {
+            toast({
+              title: "Audio stream ended",
+              description: "The broadcaster has ended the stream.",
+            });
+          }
         };
         
         // Handle connection errors
@@ -391,10 +411,12 @@ export default function StreamPage() {
             role: 'listener',
             hasStreamKey: !!streamKey
           });
+          
+          // Always show toast once
           toast({
-            title: "Audio stream error",
-            description: "Failed to connect to audio stream. The stream may be offline.",
-            variant: "destructive",
+            title: "Audio stream offline",
+            description: "The stream is currently offline or unavailable.",
+            variant: "default",
           });
         };
         

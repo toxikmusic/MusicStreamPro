@@ -63,6 +63,14 @@ export const streams = pgTable("streams", {
   endedAt: timestamp("ended_at"),
   category: text("category"),
   tags: text("tags").array(),
+  streamType: text("stream_type").default("video"), // "video" or "audio"
+  protocol: text("protocol").default("webrtc"), // "webrtc" or "hls"
+  useCamera: boolean("use_camera").default(true),
+  useMicrophone: boolean("use_microphone").default(true),
+  useSystemAudio: boolean("use_system_audio").default(false),
+  hasVisualElement: boolean("has_visual_element").default(false),
+  visualElementType: text("visual_element_type"), // "image" or "video"
+  visualElementUrl: text("visual_element_url"), // URL to uploaded image or video
   hlsPlaylistUrl: text("hls_playlist_url"), // M3U8 playlist URL
   hlsSegmentUrl: text("hls_segment_url"), // Base URL for uploading segments
   hlsFolderPath: text("hls_folder_path"), // Server-side folder where segments are stored
@@ -80,6 +88,14 @@ export const insertStreamSchema = createInsertSchema(streams).pick({
   category: true,
   tags: true,
   isLive: true,
+  streamType: true,
+  protocol: true,
+  useCamera: true,
+  useMicrophone: true,
+  useSystemAudio: true,
+  hasVisualElement: true,
+  visualElementType: true,
+  visualElementUrl: true,
   hlsPlaylistUrl: true,
   hlsSegmentUrl: true,
   hlsFolderPath: true,

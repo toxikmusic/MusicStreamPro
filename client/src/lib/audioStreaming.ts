@@ -309,7 +309,7 @@ export class AudioStreamingService {
         }
       }
       
-      const wsUrl = `${protocol}//${host}/audio?streamId=${streamId}&role=broadcaster&streamKey=${streamKey}`;
+      const wsUrl = `${protocol}//${host}/ws/audio?streamId=${streamId}&role=broadcaster&streamKey=${streamKey}`;
 
       // Mask stream key in logs
       const maskedUrl = wsUrl.replace(/streamKey=([^&]+)/, 'streamKey=****');
