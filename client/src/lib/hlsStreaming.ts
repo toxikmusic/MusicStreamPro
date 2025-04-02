@@ -208,10 +208,16 @@ export class HLSStreamingSession {
   
   /**
    * Stop the streaming session
+   * @returns Information about the ended stream, including recording options
    */
-  async stopStream(): Promise<void> {
+  async stopStream(): Promise<{
+    success: boolean;
+    showSavePrompt?: boolean;
+    temporaryUrl?: string;
+    message?: string;
+  }> {
     if (!this.streamData) {
-      return;
+      return { success: false, message: "No active stream" };
     }
     
     console.log(`HLS: Stopping stream ${this.streamData.streamId}`);
@@ -243,11 +249,22 @@ export class HLSStreamingSession {
       }
       
       this.streamActive = false;
+      
+      return {
+        success: true,
+        showSavePrompt: response.showSavePrompt || false,
+        temporaryUrl: response.temporaryUrl,
+        message: response.message
+      };
     } catch (error) {
       console.error("HLS: Failed to end stream:", error);
       if (this.options.onError) {
         this.options.onError(error as Error);
       }
+      return { 
+        success: false, 
+        message: (error as Error).message || "Failed to end stream"
+      };
     }
   }
   

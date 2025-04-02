@@ -946,7 +946,24 @@ const LiveStream = ({ initialStreamId, userId, userName }: LiveStreamProps) => {
           // End the HLS stream
           if (hlsSessionRef.current && hlsSessionRef.current.isStreamActive()) {
             console.log("Ending HLS stream");
-            await hlsSessionRef.current.stopStream();
+            try {
+              const endResult = await hlsSessionRef.current.stopStream();
+              
+              if (endResult.showSavePrompt && parseInt(streamId)) {
+                // Show dialog to save or delete recording
+                setRecordingStreamId(parseInt(streamId));
+                setTemporaryRecordingUrl(endResult.temporaryUrl);
+                setShowSaveRecordingDialog(true);
+              }
+            } catch (error) {
+              console.error("Error ending HLS stream:", error);
+              toast({
+                title: "Error",
+                description: "Failed to properly end the stream",
+                variant: "destructive"
+              });
+            }
+            
             hlsSessionRef.current = null;
           }
         }
@@ -1728,6 +1745,14 @@ const LiveStream = ({ initialStreamId, userId, userName }: LiveStreamProps) => {
           {renderViewerUI()}
         </TabsContent>
       </Tabs>
+      
+      {/* Save Recording Dialog */}
+      <SaveStreamRecordingDialog
+        isOpen={showSaveRecordingDialog}
+        onClose={() => setShowSaveRecordingDialog(false)}
+        streamId={recordingStreamId}
+        temporaryUrl={temporaryRecordingUrl}
+      />
     </div>
   );
 };
