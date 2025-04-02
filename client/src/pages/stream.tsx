@@ -81,8 +81,15 @@ export default function StreamPage() {
         description: "The stream you're looking for doesn't exist or has ended.",
         variant: "default",
       });
+    } else if (stream && !stream.isLive) {
+      // Stream exists but isn't live
+      toast({
+        title: "Stream not active",
+        description: "This stream is currently offline. Please check back later.",
+        variant: "default",
+      });
     }
-  }, [streamError, toast]);
+  }, [streamError, stream, toast]);
   
   // Draw audio visualization using canvas
   const drawVisualization = (data: Uint8Array) => {
@@ -246,18 +253,35 @@ export default function StreamPage() {
     };
   }, [streamId, user, toast]);
   
-  // Connect to audio stream and handle visualizations
+  // Connect to audio stream and handle visualizations only when stream is active
   useEffect(() => {
+    // Don't proceed if we're missing stream ID or stream data
     if (!streamId) return;
     
+    // Check if the stream is actually live and available
+    const isStreamActive = stream?.isLive || streamStatus.isLive;
+    
     // Don't try to connect if we know the stream doesn't exist or isn't live
-    if (stream && !stream.isLive) {
+    if (stream && !isStreamActive) {
       console.log("Stream exists but isn't live - not connecting to WebSocket");
       return;
     }
     
+    console.log("Stream status check:", { 
+      streamId, 
+      isLive: stream?.isLive, 
+      statusIsLive: streamStatus.isLive,
+      isStreamActive
+    });
+    
     // Set up audio stream visualization
     const setupAudioVisualizer = async () => {
+      // Check one more time if stream is active before proceeding
+      if (!isStreamActive && stream) {
+        console.log("Stream not active, aborting audio connection");
+        return;
+      }
+      
       try {
         setIsAudioConnected(false);
         
@@ -280,6 +304,7 @@ export default function StreamPage() {
             host = window.location.hostname; // Use only hostname without port
           }
         }
+        
         // Include the stream key for authentication
         const streamKey = stream?.streamKey || '';
         const audioWsUrl = `${protocol}//${host}/audio?streamId=${streamId}&role=listener&streamKey=${streamKey}`;
@@ -580,24 +605,45 @@ export default function StreamPage() {
                   {streamLoading ? (
                     <Skeleton className="w-full h-full" />
                   ) : (
-                    streamStatus.isLive ? (
+                    stream?.isLive || streamStatus.isLive ? (
                       <LiveStream 
                         initialStreamId={streamId?.toString()}
                         userId={user?.id}
                         userName={user?.displayName}
                       />
                     ) : (
-                      <video 
-                        ref={videoRef}
-                        className="w-full h-full object-contain"
-                        controls
-                        autoPlay
-                        playsInline
-                        poster={displayedStream.thumbnailUrl || undefined}
-                      >
-                        <source src="" type="video/mp4" />
-                        Your browser does not support the video tag.
-                      </video>
+                      <div className="flex flex-col items-center justify-center h-full bg-black/80 p-4 text-center">
+                        <h3 className="text-xl font-bold mb-2">Stream Offline</h3>
+                        <p className="text-gray-300 mb-4">
+                          This stream is currently not broadcasting.
+                        </p>
+                        
+                        {displayedStream.thumbnailUrl ? (
+                          <div className="relative w-full max-w-md overflow-hidden rounded shadow-lg">
+                            <img 
+                              src={displayedStream.thumbnailUrl}
+                              alt="Stream thumbnail"
+                              className="w-full opacity-70"
+                            />
+                            <div className="absolute inset-0 flex items-center justify-center">
+                              <div className="bg-black/60 px-4 py-2 rounded">
+                                OFFLINE
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <video 
+                            ref={videoRef}
+                            className="w-full max-w-md object-contain opacity-50"
+                            controls={false}
+                            playsInline
+                            poster={displayedStream.thumbnailUrl || undefined}
+                          >
+                            <source src="" type="video/mp4" />
+                            Your browser does not support the video tag.
+                          </video>
+                        )}
+                      </div>
                     )
                   )}
                 </div>
@@ -641,10 +687,17 @@ export default function StreamPage() {
                       
                       <div>
                         <div className="flex flex-wrap gap-2 mb-3">
-                          <Badge className="bg-[#00b074] hover:bg-[#00b074]/80">
-                            <span className="inline-block w-2 h-2 bg-white rounded-full animate-pulse mr-1.5"></span>
-                            LIVE
-                          </Badge>
+                          {(stream?.isLive || streamStatus.isLive) ? (
+                            <Badge className="bg-[#00b074] hover:bg-[#00b074]/80">
+                              <span className="inline-block w-2 h-2 bg-white rounded-full animate-pulse mr-1.5"></span>
+                              LIVE
+                            </Badge>
+                          ) : (
+                            <Badge className="bg-gray-600 hover:bg-gray-500">
+                              <span className="inline-block w-2 h-2 bg-gray-400 mr-1.5"></span>
+                              OFFLINE
+                            </Badge>
+                          )}
                           <Badge variant="outline" className="bg-dark-100 hover:bg-dark-100">
                             <Users size={14} className="mr-1" />
                             {(viewerCount || displayedStream.viewerCount || 0).toLocaleString()} viewers

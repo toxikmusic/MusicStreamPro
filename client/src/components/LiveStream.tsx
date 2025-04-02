@@ -77,22 +77,22 @@ const LiveStream = ({ initialStreamId, userId, userName }: LiveStreamProps) => {
   
   const { toast } = useToast();
 
-  // Setup WebSocket function
+  // Setup WebSocket function with simplified and robust connection handling
   const setupWebSocket = () => {
     // Create a WebSocket connection for signaling
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     
+    // Simplified hostname and host handling
+    let host = window.location.host;
+    
     // Log environment info to debug WebSocket connection issues
-    const isReplit = window.location.hostname.includes('.replit.dev') || 
-                    window.location.hostname.includes('.repl.co');
     console.log("Chat WebSocket environment info:", {
-      isReplit,
       hostname: window.location.hostname,
       protocol: wsProtocol,
-      host: window.location.host
+      host: host
     });
     
-    const wsURL = `${wsProtocol}//${window.location.host}/ws`;
+    const wsURL = `${wsProtocol}//${host}/ws`;
     console.log("Connecting to chat WebSocket:", wsURL);
     
     // Close any existing connection
@@ -104,7 +104,7 @@ const LiveStream = ({ initialStreamId, userId, userName }: LiveStreamProps) => {
       }
     }
     
-    // Try to connect to WebSocket with proper error handling
+    // Create a new WebSocket connection with better error handling
     try {
       const ws = new WebSocket(wsURL);
       wsRef.current = ws;
@@ -125,28 +125,30 @@ const LiveStream = ({ initialStreamId, userId, userName }: LiveStreamProps) => {
         clearTimeout(connectionTimeout);
       });
       
-      // Setup WebSocket event handlers
+      // Setup WebSocket event handlers with simplified logic
       ws.onopen = () => {
-      console.log("WebSocket connection established");
-      
-      // For viewers, join the stream automatically if provided
-      if (initialStreamId && mode === "viewer") {
-        const joinMessage = {
-          type: "join-stream",
-          data: { streamId: initialStreamId }
-        };
-        ws.send(JSON.stringify(joinMessage));
-        setIsStreaming(true);
-      }
-      
-      // If we were already streaming as a host, reconnect
-      if (isStreaming && mode === "host" && streamId) {
-        ws.send(JSON.stringify({
-          type: "host-stream",
-          data: { streamId }
-        }));
-      }
-    };
+        console.log("WebSocket connection established");
+        
+        // For viewers, join the stream automatically if provided
+        if (initialStreamId && mode === "viewer") {
+          const joinMessage = {
+            type: "join-stream",
+            data: { streamId: initialStreamId }
+          };
+          console.log("Sending join message for stream:", initialStreamId);
+          ws.send(JSON.stringify(joinMessage));
+          setIsStreaming(true);
+        }
+        
+        // If we were already streaming as a host, reconnect
+        if (isStreaming && mode === "host" && streamId) {
+          console.log("Reconnecting as host for stream:", streamId);
+          ws.send(JSON.stringify({
+            type: "host-stream",
+            data: { streamId }
+          }));
+        }
+      };
     
     ws.onmessage = (event: MessageEvent) => {
       try {
@@ -456,22 +458,62 @@ const LiveStream = ({ initialStreamId, userId, userName }: LiveStreamProps) => {
     }
   };
   
+  // State for tracking loading state
+  const [isDetailsLoading, setIsDetailsLoading] = useState(false);
+
   // Auto-join stream when initialStreamId is provided
   useEffect(() => {
     if (initialStreamId && mode === "viewer" && !isStreaming) {
-      // Fetch stream details first
+      // Fetch stream details first with improved error handling
       const fetchStreamDetails = async () => {
         try {
-          const response = await fetch(`${window.location.origin}/api/streams/${initialStreamId}`);
+          console.log("Fetching stream details for ID:", initialStreamId);
+          setIsDetailsLoading(true);
+          
+          // Use a timeout to prevent infinite loading
+          const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Request timeout')), 10000)
+          );
+          
+          // Race the fetch against the timeout
+          const responsePromise = fetch(`${window.location.origin}/api/streams/${initialStreamId}`);
+          const response = await Promise.race([responsePromise, timeoutPromise]) as Response;
+          
+          if (!response.ok) {
+            throw new Error(`Server returned ${response.status}: ${response.statusText}`);
+          }
+          
           const data = await response.json();
+          console.log("Stream details response:", data);
+          
+          // Clear loading state
+          setIsDetailsLoading(false);
           
           if (data.success && data.stream) {
+            // Check if the stream is actually live
+            if (!data.stream.isLive) {
+              console.log("Stream exists but is not live");
+              toast({
+                title: "Stream Not Live",
+                description: "This stream exists but is not currently broadcasting",
+                variant: "default"
+              });
+              return;
+            }
+            
             // Set stream details
             setStreamDetails({
               streamType: data.stream.streamType,
               hasVisualElement: !!data.stream.visualElementUrl,
               visualElementUrl: data.stream.visualElementUrl,
               visualElementType: data.stream.visualElementType || 'image'
+            });
+            
+            // Log the stream details for debugging
+            console.log("Stream details set:", {
+              streamType: data.stream.streamType,
+              hasVisualElement: !!data.stream.visualElementUrl,
+              protocol: data.stream.protocol || 'webrtc'
             });
             
             // Set protocol based on stream type if available
@@ -481,9 +523,13 @@ const LiveStream = ({ initialStreamId, userId, userName }: LiveStreamProps) => {
             
             // Join the stream if WebSocket is ready
             if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+              console.log("WebSocket is open, joining stream:", initialStreamId);
               wsRef.current.send(JSON.stringify({
                 type: "join-stream",
-                data: { streamId: initialStreamId }
+                data: { 
+                  streamId: initialStreamId,
+                  protocol: data.stream.protocol || streamProtocol
+                }
               }));
               setIsStreaming(true);
               
@@ -491,8 +537,30 @@ const LiveStream = ({ initialStreamId, userId, userName }: LiveStreamProps) => {
                 title: "Joining Stream",
                 description: "Connecting to the stream...",
               });
+            } else {
+              console.log("WebSocket not ready, current state:", wsRef.current?.readyState);
+              // Try to reconnect WebSocket
+              setupWebSocket();
+              
+              // Set a timeout to retry joining after WebSocket connects
+              setTimeout(() => {
+                if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                  console.log("Retrying join after WebSocket connection");
+                  wsRef.current.send(JSON.stringify({
+                    type: "join-stream",
+                    data: { 
+                      streamId: initialStreamId,
+                      protocol: data.stream.protocol || streamProtocol 
+                    }
+                  }));
+                  setIsStreaming(true);
+                }
+              }, 1000);
             }
           } else {
+            // Clear explicit stream not found or error
+            console.log("Stream not found or not returned in response");
+            setIsDetailsLoading(false);
             toast({
               title: "Stream Not Found",
               description: "The stream you're trying to join doesn't exist or has ended",
@@ -501,17 +569,20 @@ const LiveStream = ({ initialStreamId, userId, userName }: LiveStreamProps) => {
           }
         } catch (error) {
           console.error("Error fetching stream details:", error);
+          // Clear loading state and provide friendly error
+          setIsDetailsLoading(false);
           toast({
-            title: "Error",
-            description: "Failed to get stream details. Please try again.",
+            title: "Stream Unavailable",
+            description: "This stream cannot be accessed. It may not exist or has ended.",
             variant: "destructive"
           });
         }
       };
       
+      // Execute the fetch
       fetchStreamDetails();
     }
-  }, [initialStreamId, mode, isStreaming, toast]);
+  }, [initialStreamId, mode, isStreaming, toast, setupWebSocket, streamProtocol]);
 
   // Get available media devices
   useEffect(() => {
