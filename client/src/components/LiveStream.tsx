@@ -10,7 +10,8 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Copy, ExternalLink, Mic, MicOff, Video, VideoOff, Send, Users, Monitor, Settings, Key } from "lucide-react";
+import { Copy, ExternalLink, Mic, MicOff, Video, VideoOff, Send, Users, Monitor, Settings, Key, Globe } from "lucide-react";
+import { HLSStreamingSession } from "../lib/hlsStreaming";
 
 interface ChatMessage {
   senderId: string;
@@ -32,6 +33,7 @@ const LiveStream = ({ initialStreamId, userId, userName }: LiveStreamProps) => {
   const [shareUrl, setShareUrl] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [viewerCount, setViewerCount] = useState(0);
+  const [streamProtocol, setStreamProtocol] = useState<"webrtc" | "hls">("webrtc"); // Default to WebRTC
   
   // Media device states
   const [videoEnabled, setVideoEnabled] = useState(true);
@@ -48,6 +50,9 @@ const LiveStream = ({ initialStreamId, userId, userName }: LiveStreamProps) => {
   });
   const [selectedVideoDevice, setSelectedVideoDevice] = useState("");
   const [selectedAudioDevice, setSelectedAudioDevice] = useState("");
+  
+  // HLS streaming session
+  const hlsSessionRef = useRef<HLSStreamingSession | null>(null);
   
   // Chat states
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -567,43 +572,89 @@ const LiveStream = ({ initialStreamId, userId, userName }: LiveStreamProps) => {
         localVideoRef.current.srcObject = stream;
       }
       
-      // Create an API request to get a stream ID
-      const response = await fetch(`${window.location.origin}/api/streams/webrtc`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          userId,
-          userName: userName || 'Anonymous'
-        })
-      });
+      let streamData;
       
-      const data = await response.json();
-      
-      if (!data.success) {
-        throw new Error(data.message || "Failed to create stream");
+      if (streamProtocol === "webrtc") {
+        // Create WebRTC stream
+        console.log("Creating WebRTC stream");
+        const response = await fetch(`${window.location.origin}/api/streams/webrtc`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            userId,
+            userName: userName || 'Anonymous'
+          })
+        });
+        
+        streamData = await response.json();
+        
+        if (!streamData.success) {
+          throw new Error(streamData.message || "Failed to create WebRTC stream");
+        }
+        
+        // Emit host-stream event to WebSocket server for WebRTC
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({
+            type: "host-stream",
+            data: { streamId: streamData.streamId }
+          }));
+        }
+      } else if (streamProtocol === "hls") {
+        // Create HLS stream
+        console.log("Creating HLS stream");
+        
+        // Create the HLS streaming session
+        hlsSessionRef.current = new HLSStreamingSession({
+          title: `${userName || 'Anonymous'}'s Stream`,
+          description: `Live stream by ${userName || 'Anonymous'}`,
+          category: "Music",
+          tags: ["live", "hls"],
+          onStreamCreated: (data) => {
+            console.log("HLS stream created:", data);
+            // Update UI with stream URL
+          },
+          onSegmentUploaded: (response) => {
+            console.log("HLS segment uploaded:", response);
+          },
+          onStreamEnded: (response) => {
+            console.log("HLS stream ended:", response);
+            setIsStreaming(false);
+          },
+          onError: (error) => {
+            console.error("HLS streaming error:", error);
+            toast({
+              title: "Streaming Error",
+              description: error.message || "An error occurred during HLS streaming",
+              variant: "destructive"
+            });
+          }
+        });
+        
+        // Start the HLS stream
+        const hlsStream = await hlsSessionRef.current.startStream(stream);
+        
+        streamData = {
+          success: true,
+          streamId: hlsStream.streamId.toString(),
+          shareUrl: hlsStream.shareUrl
+        };
+      } else {
+        throw new Error("Invalid streaming protocol selected");
       }
       
-      setStreamId(data.streamId);
-      setShareUrl(data.shareUrl);
-      
-      // Emit host-stream event to WebSocket server
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({
-          type: "host-stream",
-          data: { streamId: data.streamId }
-        }));
-      }
-      
+      // Update state with stream information
+      setStreamId(streamData.streamId);
+      setShareUrl(streamData.shareUrl || `${window.location.origin}/stream/${streamData.streamId}`);
       setIsStreaming(true);
       
       toast({
         title: "Stream Created",
-        description: "Your live stream has been created successfully.",
+        description: `Your ${streamProtocol.toUpperCase()} stream has been created successfully.`,
       });
       
-      return data.streamId;
+      return streamData.streamId;
     } catch (error) {
       console.error("Error creating stream:", error);
       toast({
@@ -664,52 +715,80 @@ const LiveStream = ({ initialStreamId, userId, userName }: LiveStreamProps) => {
   };
 
   // End stream function
-  const endStream = () => {
-    // Notify server the stream is ending
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      if (mode === "host" && streamId) {
-        wsRef.current.send(JSON.stringify({
-          type: "end-stream",
-          data: { streamId }
-        }));
+  const endStream = async () => {
+    try {
+      // Handle different protocols differently
+      if (mode === "host") {
+        if (streamProtocol === "webrtc") {
+          // Notify server the WebRTC stream is ending
+          if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && streamId) {
+            wsRef.current.send(JSON.stringify({
+              type: "end-stream",
+              data: { streamId }
+            }));
+          }
+        } else if (streamProtocol === "hls") {
+          // End the HLS stream
+          if (hlsSessionRef.current && hlsSessionRef.current.isStreamActive()) {
+            console.log("Ending HLS stream");
+            await hlsSessionRef.current.stopStream();
+            hlsSessionRef.current = null;
+          }
+        }
       } else if (mode === "viewer" && streamId) {
-        wsRef.current.send(JSON.stringify({
-          type: "leave-stream",
-          data: { streamId }
-        }));
+        // For viewers, always leave the WebRTC stream if connected
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({
+            type: "leave-stream",
+            data: { streamId }
+          }));
+        }
+        
+        // For HLS viewers, just stop the video playback
+        // This will be handled by the HTML5 video player itself
       }
+      
+      // Stop tracks and clean up
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(track => track.stop());
+        localStreamRef.current = null;
+      }
+      
+      // Clear video elements
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = null;
+      }
+      
+      if (remoteVideoRef.current) {
+        remoteVideoRef.current.srcObject = null;
+      }
+      
+      // Clean up peer connections
+      Object.values(peersRef.current).forEach(peer => {
+        peer.destroy();
+      });
+      peersRef.current = {};
+      
+      // Reset state
+      setIsStreaming(false);
+      setChatMessages([]);
+      setViewerCount(0);
+      
+      toast({
+        title: mode === "host" ? "Stream Ended" : "Left Stream",
+        description: mode === "host" ? "Your live stream has ended" : "You have left the stream",
+      });
+    } catch (error) {
+      console.error("Error ending stream:", error);
+      toast({
+        title: "Error",
+        description: "Failed to properly end the stream. Some resources may not have been cleaned up.",
+        variant: "destructive"
+      });
+      
+      // Still reset the UI state to avoid user confusion
+      setIsStreaming(false);
     }
-    
-    // Stop tracks and clean up
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach(track => track.stop());
-      localStreamRef.current = null;
-    }
-    
-    // Clear video elements
-    if (localVideoRef.current) {
-      localVideoRef.current.srcObject = null;
-    }
-    
-    if (remoteVideoRef.current) {
-      remoteVideoRef.current.srcObject = null;
-    }
-    
-    // Clean up peer connections
-    Object.values(peersRef.current).forEach(peer => {
-      peer.destroy();
-    });
-    peersRef.current = {};
-    
-    // Reset state
-    setIsStreaming(false);
-    setChatMessages([]);
-    setViewerCount(0);
-    
-    toast({
-      title: mode === "host" ? "Stream Ended" : "Left Stream",
-      description: mode === "host" ? "Your live stream has ended" : "You have left the stream",
-    });
   };
 
   // Toggle video/audio functions
@@ -925,17 +1004,6 @@ const LiveStream = ({ initialStreamId, userId, userName }: LiveStreamProps) => {
       description: "Use this key in OBS or other streaming software",
     });
   };
-function LiveStream({ userId, userName, streamId }) {
-  if (!streamId) return <p>Loading stream...</p>;
-
-  return (
-    <div>
-      <h2>Streaming as {userName}</h2>
-      <p>Stream Key: {streamId}</p>
-      {/* WebRTC stream setup here */}
-    </div>
-  );
-}
   // Chat function
   const sendChatMessage = () => {
     if (!currentMessage.trim() || !streamId || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;

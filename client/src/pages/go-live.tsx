@@ -3,7 +3,7 @@ import { useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import LiveStream from "@/components/LiveStream";
 import { useToast } from "@/hooks/use-toast";
-import { createStreamEntry } from "@/lib/database"; // Function to create stream in DB
+import { createStream } from "@/lib/api"; // Function to create stream via API
 
 export default function GoLivePage() {
   const [, navigate] = useLocation();
@@ -20,21 +20,32 @@ export default function GoLivePage() {
       });
       navigate("/login");
     } else {
-      // Generate a unique stream ID
-      const newStreamId = crypto.randomUUID();
-      setStreamId(newStreamId);
-
-      // Store stream entry in the database
-      createStreamEntry({
-        id: newStreamId,
-        userId: user.id,
-        userName: user.username || user.displayName,
-        isLive: true,
-        createdAt: new Date().toISOString(),
-      });
-
-      // Redirect to the streaming page
-      navigate(`/stream/${newStreamId}`);
+      // Create a new stream via API
+      const createStreamAsync = async () => {
+        try {
+          const streamData = await createStream({
+            title: `${user.username || user.displayName}'s Stream`,
+            description: `Live stream by ${user.username || user.displayName}`,
+            category: "Music",
+            tags: ["live"]
+          });
+          
+          // Set the stream ID from the created stream
+          setStreamId(streamData.id.toString());
+          
+          // Redirect to the streaming page
+          navigate(`/stream/${streamData.id}`);
+        } catch (error) {
+          console.error("Failed to create stream:", error);
+          toast({
+            title: "Error",
+            description: "Failed to create stream. Please try again.",
+            variant: "destructive",
+          });
+        }
+      };
+      
+      createStreamAsync();
     }
   }, [user, navigate, toast]);
 
@@ -45,7 +56,7 @@ export default function GoLivePage() {
         Create and share live streams with your audience using our WebRTC-based streaming platform.
       </p>
 
-      <LiveStream userId={user?.id} userName={user?.username || user?.displayName} streamId={streamId} />
+      <LiveStream userId={user?.id} userName={user?.username || user?.displayName} initialStreamId={streamId} />
     </div>
   ) : null;
 }

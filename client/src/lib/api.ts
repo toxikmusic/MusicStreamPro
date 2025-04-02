@@ -104,9 +104,20 @@ export async function getActiveStreamsByUser(userId: number): Promise<Stream[]> 
 }
 
 export async function createStream(data: Partial<Stream>): Promise<Stream> {
+  // Get current user ID from authentication
+  const user = await apiRequest<User>("/api/user");
+  
+  // Add userId to stream data
+  const streamData = {
+    ...data,
+    userId: user.id
+  };
+  
+  console.log("Creating stream with data:", streamData);
+  
   return await apiRequest<Stream>("/api/streams", {
     method: "POST",
-    body: data
+    body: streamData
   });
 }
 
@@ -136,11 +147,19 @@ export async function createHLSStream(data: {
   streamId: number;
   streamKey: string;
   hlsPlaylistUrl: string;
+  hlsSegmentUrl: string;
   shareUrl: string;
 }> {
+  // Get current user ID from authentication
+  const user = await apiRequest<User>("/api/user");
+  
+  // Create the stream with user ID
   return await apiRequest<any>('/api/streams/hls', {
     method: "POST",
-    body: data
+    body: {
+      ...data,
+      userId: user.id
+    }
   });
 }
 
@@ -149,6 +168,7 @@ export async function initializeHLSStream(streamId: number): Promise<{
   success: boolean;
   streamId: number;
   hlsPlaylistUrl: string;
+  hlsSegmentUrl: string;
 }> {
   return await apiRequest<any>(`/api/streams/${streamId}/hls`, {
     method: "POST"
