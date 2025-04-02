@@ -925,7 +925,17 @@ const LiveStream = ({ initialStreamId, userId, userName }: LiveStreamProps) => {
       description: "Use this key in OBS or other streaming software",
     });
   };
+function LiveStream({ userId, userName, streamId }) {
+  if (!streamId) return <p>Loading stream...</p>;
 
+  return (
+    <div>
+      <h2>Streaming as {userName}</h2>
+      <p>Stream Key: {streamId}</p>
+      {/* WebRTC stream setup here */}
+    </div>
+  );
+}
   // Chat function
   const sendChatMessage = () => {
     if (!currentMessage.trim() || !streamId || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
