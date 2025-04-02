@@ -51,6 +51,34 @@ export default function Dashboard() {
   
   // Calculate total followers (from user's follower count)
   const totalFollowers = user?.followerCount || 0;
+  
+  // Calculate average stream duration based on completed streams
+  const calculateAverageStreamDuration = () => {
+    // Filter to only include completed streams with start and end times
+    const completedStreams = streams.filter(stream => 
+      stream.startedAt && stream.endedAt && !stream.isLive
+    );
+    
+    if (completedStreams.length === 0) {
+      return 'N/A';
+    }
+    
+    // Calculate total duration in milliseconds
+    const totalDuration = completedStreams.reduce((sum, stream) => {
+      const start = new Date(stream.startedAt || 0).getTime();
+      const end = new Date(stream.endedAt || 0).getTime();
+      return sum + (end - start);
+    }, 0);
+    
+    // Calculate average duration in milliseconds
+    const avgDurationMs = totalDuration / completedStreams.length;
+    
+    // Convert to hours and minutes
+    const hours = Math.floor(avgDurationMs / (1000 * 60 * 60));
+    const minutes = Math.floor((avgDurationMs % (1000 * 60 * 60)) / (1000 * 60));
+    
+    return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+  };
 
   // Get live streams
   const liveStreams = streams.filter(stream => stream.isLive);
@@ -414,7 +442,7 @@ export default function Dashboard() {
                 <Clock className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">1h 23m</div>
+                <div className="text-2xl font-bold">{calculateAverageStreamDuration()}</div>
                 <p className="text-xs text-muted-foreground">Per stream</p>
               </CardContent>
             </Card>

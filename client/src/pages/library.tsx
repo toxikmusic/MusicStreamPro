@@ -24,16 +24,11 @@ export default function LibraryPage() {
     queryFn: getRecentTracks
   });
 
-  // Mock playlists until we have playlists functionality
-  const mockPlaylists = [
-    { id: 1, name: 'Favorite Tracks', trackCount: 12, imageUrl: 'https://source.unsplash.com/random/300x300?abstract=1' },
-    { id: 2, name: 'Workout Mix', trackCount: 8, imageUrl: 'https://source.unsplash.com/random/300x300?abstract=2' },
-    { id: 3, name: 'Chill Vibes', trackCount: 15, imageUrl: 'https://source.unsplash.com/random/300x300?abstract=3' },
-    { id: 4, name: 'Study Music', trackCount: 10, imageUrl: 'https://source.unsplash.com/random/300x300?abstract=4' },
-  ];
-
-  // Mock history until we have history functionality
-  const mockHistory = tracks ? tracks.slice(0, 5) : [];
+  // Playlist functionality to be implemented
+  const playlists = [];
+  
+  // History functionality to be implemented
+  const trackHistory = [];
 
   return (
     <div className="min-h-screen bg-background">
@@ -78,62 +73,25 @@ export default function LibraryPage() {
               </TabsContent>
               
               <TabsContent value="playlists" className="mt-6">
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                  {mockPlaylists.map((playlist) => (
-                    <Card key={playlist.id} className="overflow-hidden hover:shadow-md transition-shadow">
-                      <CardContent className="p-0">
-                        <Link href={`/playlist/${playlist.id}`} className="block">
-                          <div className="aspect-square overflow-hidden">
-                            <img 
-                              src={playlist.imageUrl} 
-                              alt={playlist.name}
-                              className="w-full h-full object-cover" 
-                            />
-                          </div>
-                          <div className="p-4">
-                            <h3 className="font-medium">{playlist.name}</h3>
-                            <p className="text-sm text-muted-foreground">{playlist.trackCount} tracks</p>
-                          </div>
-                        </Link>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
+                <Card>
+                  <CardContent className="py-12 text-center">
+                    <p className="text-muted-foreground mb-4">Playlist functionality coming soon.</p>
+                    <Button asChild>
+                      <Link href="/discover">Browse Tracks</Link>
+                    </Button>
+                  </CardContent>
+                </Card>
               </TabsContent>
               
               <TabsContent value="history" className="mt-6">
-                {mockHistory.length > 0 ? (
-                  <div className="grid grid-cols-1 gap-2">
-                    {mockHistory.map((track) => (
-                      <Card key={track.id} className="overflow-hidden hover:bg-accent/50 transition-colors">
-                        <CardContent className="py-3 px-4">
-                          <div className="flex items-center gap-3">
-                            <div className="h-12 w-12 bg-accent rounded overflow-hidden">
-                              <img 
-                                src={track.coverUrl || 'https://source.unsplash.com/random/50x50?abstract'} 
-                                alt={track.title}
-                                className="h-full w-full object-cover" 
-                              />
-                            </div>
-                            <div className="flex-1">
-                              <h3 className="font-medium">{track.title}</h3>
-                              <p className="text-sm text-muted-foreground">{track.artistName}</p>
-                            </div>
-                            <div className="text-sm text-muted-foreground">
-                              Played today
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
-                ) : (
-                  <Card>
-                    <CardContent className="py-12 text-center">
-                      <p className="text-muted-foreground">You haven't played any tracks yet.</p>
-                    </CardContent>
-                  </Card>
-                )}
+                <Card>
+                  <CardContent className="py-12 text-center">
+                    <p className="text-muted-foreground mb-4">Listening history feature coming soon.</p>
+                    <Button asChild>
+                      <Link href="/discover">Discover New Music</Link>
+                    </Button>
+                  </CardContent>
+                </Card>
               </TabsContent>
             </Tabs>
             
