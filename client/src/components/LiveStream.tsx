@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Copy, ExternalLink, Mic, MicOff, Video, VideoOff, Send, Users, Monitor, Settings, Key, Globe } from "lucide-react";
 import { HLSStreamingSession } from "../lib/hlsStreaming";
+import { SaveStreamRecordingDialog } from "./streams/SaveStreamRecordingDialog";
 
 interface ChatMessage {
   senderId: string;
@@ -42,6 +43,11 @@ const LiveStream = ({ initialStreamId, userId, userName }: LiveStreamProps) => {
     visualElementUrl?: string;
     visualElementType?: "image" | "video";
   }>({});
+  
+  // Recording dialog state
+  const [showSaveRecordingDialog, setShowSaveRecordingDialog] = useState(false);
+  const [recordingStreamId, setRecordingStreamId] = useState<number>(0);
+  const [temporaryRecordingUrl, setTemporaryRecordingUrl] = useState<string>();
   
   // Media device states
   const [videoEnabled, setVideoEnabled] = useState(true);

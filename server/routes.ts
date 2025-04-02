@@ -33,8 +33,10 @@ import {
   createOrUpdateHLSPlaylist,
   uploadSegment,
   endHLSStream,
-  processWebRTCChunk
+  processWebRTCChunk,
+  finalizeStreamRecording
 } from "./hls";
+import { objectStorage } from "./object-storage";
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(process.cwd(), "uploads");
@@ -100,6 +102,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   // Serve static files from the uploads directory
   app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+  
+  // Add middleware for streaming content from object storage
+  app.use(objectStorage.serveContent.bind(objectStorage));
 
   // Initialize WebSocket server for chat
   const wss = new WebSocketServer({ noServer: true });
@@ -1415,8 +1420,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Invalid stream ID" });
       }
       
-      // End the HLS stream
-      await endHLSStream(streamId, req.user.id);
+      // End the HLS stream with our enhanced functionality
+      const endResult = await endHLSStream(streamId, req.user.id);
       
       // Update stream in database
       await storage.updateStream(streamId, {
@@ -1424,13 +1429,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
         endedAt: new Date()
       });
       
-      res.json({
-        success: true,
-        message: "Stream ended successfully"
-      });
+      // Return result with potential save prompt
+      res.json(endResult);
     } catch (error) {
       console.error("Error ending HLS stream:", error);
       res.status(500).json({ message: "Failed to end HLS stream" });
+    }
+  });
+  
+  // Route to finalize a stream recording (save or delete)
+  app.post("/api/streams/:streamId/recording/finalize", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    
+    try {
+      const streamId = parseInt(req.params.streamId);
+      if (isNaN(streamId)) {
+        return res.status(400).json({ message: "Invalid stream ID" });
+      }
+      
+      const { savePermanently } = req.body;
+      
+      if (typeof savePermanently !== 'boolean') {
+        return res.status(400).json({ message: "Missing or invalid 'savePermanently' parameter" });
+      }
+      
+      // Finalize the recording (save or delete)
+      const result = await finalizeStreamRecording(streamId, req.user.id, savePermanently);
+      
+      res.json(result);
+    } catch (error) {
+      console.error("Error finalizing stream recording:", error);
+      res.status(500).json({ message: "Failed to finalize recording" });
     }
   });
   

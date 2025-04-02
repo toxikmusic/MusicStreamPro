@@ -1,6 +1,8 @@
 /**
  * HLS (HTTP Live Streaming) handler for livestreams
  * Manages dynamic M3U8 playlist creation and segment handling
+ * 
+ * Enhanced with cloud object storage support for temporary and permanent recordings
  */
 
 import { Request, Response } from 'express';
@@ -8,6 +10,7 @@ import fs from 'fs';
 import path from 'path';
 import { Stream } from '@shared/schema';
 import { storage } from './storage';
+import { objectStorage } from './object-storage';
 
 // Maps active streams to their HLS info
 interface HLSStreamInfo {
@@ -19,12 +22,14 @@ interface HLSStreamInfo {
   duration: number; // Total stream duration in seconds
   sequence: number; // Media sequence number
   bandwidth: number; // Estimated bandwidth in bits/s
+  useObjectStorage: boolean; // Whether to use object storage for this stream
 }
 
 // In-memory store of active HLS streams
 const hlsStreams = new Map<string, HLSStreamInfo>();
 
-// Directory for storing temporary HLS segments
+// Directory for storing temporary HLS segments 
+// (fallback if object storage isn't configured)
 const HLS_TEMP_DIR = path.join(process.cwd(), 'uploads', 'hls');
 
 // Ensure HLS directory exists
@@ -56,7 +61,10 @@ export async function createOrUpdateHLSPlaylist(
     // Get or create stream HLS info
     let streamInfo = hlsStreams.get(streamId.toString());
     if (!streamInfo) {
-      streamInfo = {
+      // Check if object storage is available
+      const useObjectStorage = process.env.OBJECT_STORAGE_BUCKET ? true : false;
+      
+      const newStreamInfo: HLSStreamInfo = {
         userId,
         streamId,
         segments: [],
@@ -64,28 +72,52 @@ export async function createOrUpdateHLSPlaylist(
         startTime: new Date(),
         duration: 0,
         sequence: 0,
-        bandwidth: 800000 // Default bandwidth (800kbps)
+        bandwidth: 800000, // Default bandwidth (800kbps)
+        useObjectStorage // Use object storage if available
       };
+      
+      streamInfo = newStreamInfo;
       hlsStreams.set(streamId.toString(), streamInfo);
       
-      // Create stream directory if it doesn't exist
-      const streamDir = path.join(HLS_TEMP_DIR, streamId.toString());
-      if (!fs.existsSync(streamDir)) {
-        fs.mkdirSync(streamDir, { recursive: true });
+      // If not using object storage, ensure local directory exists
+      if (!useObjectStorage) {
+        const streamDir = path.join(HLS_TEMP_DIR, streamId.toString());
+        if (!fs.existsSync(streamDir)) {
+          fs.mkdirSync(streamDir, { recursive: true });
+        }
       }
+      
+      console.log(`Created new HLS stream ${streamId} with ${useObjectStorage ? 'object storage' : 'local storage'}`);
     }
 
     // If a new segment was provided
-    if (segment) {
+    if (segment && streamInfo) {
       // Calculate segment filename based on sequence
-      const segmentName = `segment_${streamInfo.segments.length}.ts`;
-      const segmentPath = path.join(HLS_TEMP_DIR, streamId.toString(), segmentName);
+      const segmentIndex = streamInfo.segments.length;
+      const segmentName = `segment_${segmentIndex}.ts`;
       
-      // Write segment to disk
-      fs.writeFileSync(segmentPath, segment);
+      // Store the segment (either local or object storage)
+      let segmentUrl: string;
       
-      // Add to segments list
-      streamInfo.segments.push(segmentName);
+      if (streamInfo.useObjectStorage) {
+        // Store in object storage
+        segmentUrl = await objectStorage.storeSegment(
+          streamId,
+          userId,
+          segment,
+          segmentIndex
+        );
+        
+        // Add to segments list with the returned URL
+        streamInfo.segments.push(segmentUrl);
+      } else {
+        // Store locally
+        const segmentPath = path.join(HLS_TEMP_DIR, streamId.toString(), segmentName);
+        fs.writeFileSync(segmentPath, segment);
+        
+        // Add to segments list with just the filename for local storage
+        streamInfo.segments.push(segmentName);
+      }
       
       // Update stream info
       streamInfo.lastUpdated = new Date();
@@ -109,10 +141,22 @@ export async function createOrUpdateHLSPlaylist(
       if (stream && !stream.isLive) {
         await storage.updateStream(streamId, { isLive: true });
       }
+      
+      // If using object storage, update the playlist too
+      if (streamInfo.useObjectStorage) {
+        await objectStorage.updatePlaylist(streamId, streamInfo.segments);
+      }
     }
 
-    // Generate the playlist URL
-    const playlistUrl = `/hls/${streamId}/playlist.m3u8`;
+    // Generate the playlist URL based on storage type
+    let playlistUrl: string;
+    
+    if (streamInfo.useObjectStorage) {
+      playlistUrl = `/stream-recordings/stream-${streamId}/playlist.m3u8`;
+    } else {
+      playlistUrl = `/hls/${streamId}/playlist.m3u8`;
+    }
+    
     return playlistUrl;
     
   } catch (error) {
@@ -123,8 +167,15 @@ export async function createOrUpdateHLSPlaylist(
 
 /**
  * Ends a stream's HLS playlist
+ * 
+ * @returns An object with stream details and a flag indicating if a save prompt should be shown
  */
-export async function endHLSStream(streamId: number, userId: number): Promise<void> {
+export async function endHLSStream(streamId: number, userId: number): Promise<{
+  success: boolean;
+  showSavePrompt: boolean;
+  temporaryUrl?: string;
+  message: string;
+}> {
   try {
     // Get stream from database to verify it exists
     const stream = await storage.getStream(streamId);
@@ -137,16 +188,93 @@ export async function endHLSStream(streamId: number, userId: number): Promise<vo
       throw new Error('Not authorized to end this stream');
     }
 
+    // Get stream info
+    const streamInfo = hlsStreams.get(streamId.toString());
+    const useObjectStorage = streamInfo?.useObjectStorage || false;
+    
     // Remove from active HLS streams
     hlsStreams.delete(streamId.toString());
     
     // Update stream in database
     await storage.updateStream(streamId, { isLive: false });
     
-    // Note: We don't delete the segments here to allow for replay
-    // They can be cleaned up by a separate process or kept for VOD playback
+    // If using object storage, we should prompt the user to save
+    if (useObjectStorage) {
+      // Get details about the recording
+      const recordingDetails = objectStorage.getRecordingDetails(streamId);
+      
+      if (recordingDetails) {
+        return {
+          success: true,
+          showSavePrompt: true,
+          temporaryUrl: `/stream-recordings/stream-${streamId}/playlist.m3u8`,
+          message: 'Stream ended. The recording is temporarily available.'
+        };
+      }
+    }
+    
+    // Default response (local storage or no recording)
+    return {
+      success: true,
+      showSavePrompt: false,
+      message: 'Stream ended.'
+    };
   } catch (error) {
     console.error('Error ending HLS stream:', error);
+    throw error;
+  }
+}
+
+/**
+ * Finalizes a stream recording - either saves it permanently or deletes it
+ */
+export async function finalizeStreamRecording(
+  streamId: number, 
+  userId: number, 
+  savePermanently: boolean
+): Promise<{
+  success: boolean;
+  message: string;
+  permanentUrl?: string;
+}> {
+  try {
+    // Get stream from database to verify it exists
+    const stream = await storage.getStream(streamId);
+    if (!stream) {
+      throw new Error(`Stream ${streamId} not found`);
+    }
+
+    // Validate the user is the stream owner
+    if (stream.userId !== userId) {
+      throw new Error('Not authorized to manage this stream recording');
+    }
+    
+    // Finalize the recording
+    const result = await objectStorage.finalizeRecording(streamId, savePermanently);
+    
+    if (result) {
+      if (savePermanently) {
+        // Get the permanent URL
+        const recordingDetails = objectStorage.getRecordingDetails(streamId);
+        return {
+          success: true,
+          message: 'Stream recording saved permanently',
+          permanentUrl: recordingDetails?.playlistUrl
+        };
+      } else {
+        return {
+          success: true,
+          message: 'Stream recording deleted'
+        };
+      }
+    } else {
+      return {
+        success: false,
+        message: 'Stream recording not found'
+      };
+    }
+  } catch (error) {
+    console.error('Error finalizing stream recording:', error);
     throw error;
   }
 }

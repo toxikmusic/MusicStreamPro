@@ -232,10 +232,24 @@ export async function initializeHLSStream(streamId: number): Promise<{
 // End an HLS stream
 export async function endHLSStream(streamId: number): Promise<{
   success: boolean;
+  showSavePrompt: boolean;
+  temporaryUrl?: string;
   message: string;
 }> {
   return await apiRequest<any>(`/api/streams/${streamId}/hls/end`, {
     method: "POST"
+  });
+}
+
+// Finalize a stream recording (save or delete)
+export async function finalizeStreamRecording(streamId: number, savePermanently: boolean): Promise<{
+  success: boolean;
+  message: string;
+  permanentUrl?: string;
+}> {
+  return await apiRequest<any>(`/api/streams/${streamId}/recording/finalize`, {
+    method: "POST",
+    body: { savePermanently }
   });
 }
 
