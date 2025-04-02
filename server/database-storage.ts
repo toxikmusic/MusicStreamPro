@@ -205,6 +205,34 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
   
+  async deletePost(id: number): Promise<boolean> {
+    try {
+      // First, delete associated likes
+      await db.delete(likes)
+        .where(and(
+          eq(likes.contentId, id),
+          eq(likes.contentType, 'post')
+        ));
+        
+      // Delete associated comments
+      await db.delete(comments)
+        .where(and(
+          eq(comments.contentId, id),
+          eq(comments.contentType, 'post')
+        ));
+      
+      // Delete the post
+      const result = await db.delete(posts)
+        .where(eq(posts.id, id))
+        .returning();
+      
+      return result.length > 0;
+    } catch (error) {
+      console.error('Error deleting post:', error);
+      return false;
+    }
+  }
+  
   // Streams
   async getStream(id: number): Promise<Stream | undefined> {
     const result = await db.select({

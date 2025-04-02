@@ -27,6 +27,7 @@ import Dashboard from "@/pages/dashboard";
 import HealthTest from "@/pages/health-test";
 import SharePage from "@/pages/share";
 import SearchPage from "@/pages/search";
+import TestDeletes from "@/pages/test-deletes";
 
 function Router() {
   return (
@@ -44,6 +45,7 @@ function Router() {
       <ProtectedRoute path="/upload-track" component={UploadTrack} />
       <ProtectedRoute path="/dashboard" component={Dashboard} />
       <ProtectedRoute path="/search" component={SearchPage} />
+      <ProtectedRoute path="/test-deletes" component={TestDeletes} />
       <Route path="/auth" component={AuthPage} />
       <Route path="/auth-test" component={AuthTest} />
       <Route path="/health-test" component={HealthTest} />

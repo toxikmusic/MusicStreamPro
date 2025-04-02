@@ -950,6 +950,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get all tracks
+  app.get("/api/tracks", async (req, res) => {
+    try {
+      // Use the getRecentTracks method which returns all tracks sorted by most recent
+      const tracks = await storage.getRecentTracks();
+      res.json(tracks);
+    } catch (error) {
+      console.error("Error fetching tracks:", error);
+      res.status(500).json({ message: "Failed to fetch tracks" });
+    }
+  });
+
   // Get recent tracks
   app.get("/api/tracks/recent", async (req, res) => {
     try {
@@ -1104,6 +1116,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error updating user settings:", error);
       res.status(500).json({ message: "Failed to update user settings" });
+    }
+  });
+
+  // Get all posts
+  app.get("/api/posts", async (req, res) => {
+    try {
+      // Use the getRecentPosts method which returns all posts sorted by most recent
+      const posts = await storage.getRecentPosts();
+      res.json(posts);
+    } catch (error) {
+      console.error("Error fetching posts:", error);
+      res.status(500).json({ message: "Failed to fetch posts" });
     }
   });
 
@@ -1262,6 +1286,72 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error deleting stream:", error);
       res.status(500).json({ message: "Failed to delete stream" });
+    }
+  });
+  
+  // Delete track endpoint
+  app.delete("/api/tracks/:id", async (req, res) => {
+    try {
+      const trackId = parseInt(req.params.id);
+      if (isNaN(trackId)) {
+        return res.status(400).json({ message: "Invalid track ID" });
+      }
+      
+      // Get the track
+      const track = await storage.getTrack(trackId);
+      if (!track) {
+        return res.status(404).json({ message: "Track not found" });
+      }
+      
+      // Check authorization (only track owner can delete it)
+      if (req.isAuthenticated() && req.user.id !== track.userId) {
+        return res.status(403).json({ message: "Not authorized to delete this track" });
+      }
+      
+      // Delete the track
+      const success = await storage.deleteTrack(trackId);
+      
+      if (success) {
+        res.json({ success: true });
+      } else {
+        res.status(500).json({ message: "Failed to delete track" });
+      }
+    } catch (error) {
+      console.error("Error deleting track:", error);
+      res.status(500).json({ message: "Failed to delete track" });
+    }
+  });
+  
+  // Delete post endpoint
+  app.delete("/api/posts/:id", async (req, res) => {
+    try {
+      const postId = parseInt(req.params.id);
+      if (isNaN(postId)) {
+        return res.status(400).json({ message: "Invalid post ID" });
+      }
+      
+      // Get the post
+      const post = await storage.getPost(postId);
+      if (!post) {
+        return res.status(404).json({ message: "Post not found" });
+      }
+      
+      // Check authorization (only post owner can delete it)
+      if (req.isAuthenticated() && req.user.id !== post.userId) {
+        return res.status(403).json({ message: "Not authorized to delete this post" });
+      }
+      
+      // Delete the post
+      const success = await storage.deletePost(postId);
+      
+      if (success) {
+        res.json({ success: true });
+      } else {
+        res.status(500).json({ message: "Failed to delete post" });
+      }
+    } catch (error) {
+      console.error("Error deleting post:", error);
+      res.status(500).json({ message: "Failed to delete post" });
     }
   });
 

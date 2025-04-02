@@ -240,6 +240,35 @@ const LiveStream = ({ initialStreamId, userId, userName }: LiveStreamProps) => {
     
     // Cleanup on unmount
     return () => {
+      // If this is the host, end the stream when leaving the page
+      if (mode === "host" && streamId) {
+        // End the stream based on protocol
+        if (streamProtocol === "webrtc") {
+          // End WebRTC stream
+          if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify({
+              type: "end-stream",
+              data: { streamId }
+            }));
+          }
+        } else if (streamProtocol === "hls") {
+          // End HLS stream - using a synchronous approach for unmount
+          if (hlsSessionRef.current && hlsSessionRef.current.isStreamActive()) {
+            try {
+              // Use fetch with keepalive to ensure the request completes even if page is unloading
+              fetch(`/api/streams/${streamId}/end`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                keepalive: true // This ensures the request completes even during page unload
+              });
+            } catch (error) {
+              console.error("Error ending HLS stream during page unload:", error);
+            }
+          }
+        }
+      }
+      
+      // Stop all media tracks
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach(track => track.stop());
       }
@@ -254,7 +283,7 @@ const LiveStream = ({ initialStreamId, userId, userName }: LiveStreamProps) => {
         wsRef.current.close();
       }
     };
-  }, [initialStreamId, mode, toast]);
+  }, [initialStreamId, mode, streamId, streamProtocol, toast]);
   
   // Handle viewer joined event
   const handleViewerJoined = ({ viewerId }: { viewerId: string }) => {
@@ -448,6 +477,11 @@ const LiveStream = ({ initialStreamId, userId, userName }: LiveStreamProps) => {
       }
       
       setIsStreaming(false);
+      
+      // Redirect to homepage after a short delay
+      setTimeout(() => {
+        window.location.href = '/';
+      }, 3000); // 3 second delay to allow the toast message to be seen
     }
   };
   

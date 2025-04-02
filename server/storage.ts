@@ -75,6 +75,7 @@ export interface IStorage {
   getRecentPosts(): Promise<Post[]>;
   getPostsByUser(userId: number): Promise<Post[]>;
   createPost(post: InsertPost): Promise<Post>;
+  deletePost(id: number): Promise<boolean>;
   
   // Genres
   getGenres(): Promise<Genre[]>;
@@ -330,6 +331,31 @@ export class MemStorage implements IStorage {
     
     this.posts.set(id, post);
     return post;
+  }
+  
+  async deletePost(id: number): Promise<boolean> {
+    const post = this.posts.get(id);
+    if (!post) {
+      return false;
+    }
+    
+    // Delete associated likes
+    const likesToRemove = Array.from(this.likes.values())
+      .filter(like => like.contentId === id && like.contentType === 'post')
+      .map(like => like.id);
+    
+    likesToRemove.forEach(likeId => this.likes.delete(likeId));
+    
+    // Delete associated comments
+    const commentsToRemove = Array.from(this.comments.values())
+      .filter(comment => comment.contentId === id && comment.contentType === 'post')
+      .map(comment => comment.id);
+    
+    commentsToRemove.forEach(commentId => this.comments.delete(commentId));
+    
+    // Delete the post
+    this.posts.delete(id);
+    return true;
   }
   
   // Streams
