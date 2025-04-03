@@ -42,6 +42,7 @@ const LiveStream = ({ initialStreamId, userId, userName }: LiveStreamProps) => {
     hasVisualElement?: boolean;
     visualElementUrl?: string;
     visualElementType?: "image" | "video";
+    protocol?: "webrtc" | "hls" | "cloudflare";
   }>({});
   
   // Recording dialog state
@@ -1917,6 +1918,15 @@ const LiveStream = ({ initialStreamId, userId, userName }: LiveStreamProps) => {
                     autoPlay
                     playsInline
                     className="hidden"
+                  />
+                </div>
+              ) : streamProtocol === "cloudflare" ? (
+                <div style={{ position: "relative", paddingTop: "56.25%", width: "100%", height: "100%" }}>
+                  <iframe
+                    src={`https://customer-t2aair0gpwhh9qzs.cloudflarestream.com/${streamId}/iframe`}
+                    style={{ border: "none", position: "absolute", top: 0, left: 0, height: "100%", width: "100%" }}
+                    allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;"
+                    allowFullScreen={true}
                   />
                 </div>
               ) : (

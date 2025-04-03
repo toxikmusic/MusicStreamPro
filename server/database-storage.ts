@@ -247,7 +247,22 @@ export class DatabaseStorage implements IStorage {
       startedAt: streams.startedAt,
       endedAt: streams.endedAt,
       category: streams.category,
-      tags: streams.tags
+      tags: streams.tags,
+      streamType: streams.streamType,
+      protocol: streams.protocol,
+      useCamera: streams.useCamera,
+      useMicrophone: streams.useMicrophone,
+      useSystemAudio: streams.useSystemAudio,
+      hasVisualElement: streams.hasVisualElement,
+      visualElementType: streams.visualElementType,
+      visualElementUrl: streams.visualElementUrl,
+      hlsPlaylistUrl: streams.hlsPlaylistUrl,
+      hlsSegmentUrl: streams.hlsSegmentUrl,
+      hlsFolderPath: streams.hlsFolderPath,
+      hasRecording: streams.hasRecording,
+      recordingUrl: streams.recordingUrl,
+      peakViewerCount: streams.peakViewerCount,
+      externalStreamId: streams.externalStreamId
     })
     .from(streams)
     .where(eq(streams.id, id));
@@ -268,7 +283,22 @@ export class DatabaseStorage implements IStorage {
       startedAt: streams.startedAt,
       endedAt: streams.endedAt,
       category: streams.category,
-      tags: streams.tags
+      tags: streams.tags,
+      streamType: streams.streamType,
+      protocol: streams.protocol,
+      useCamera: streams.useCamera,
+      useMicrophone: streams.useMicrophone,
+      useSystemAudio: streams.useSystemAudio,
+      hasVisualElement: streams.hasVisualElement,
+      visualElementType: streams.visualElementType,
+      visualElementUrl: streams.visualElementUrl,
+      hlsPlaylistUrl: streams.hlsPlaylistUrl,
+      hlsSegmentUrl: streams.hlsSegmentUrl,
+      hlsFolderPath: streams.hlsFolderPath,
+      hasRecording: streams.hasRecording,
+      recordingUrl: streams.recordingUrl,
+      peakViewerCount: streams.peakViewerCount,
+      externalStreamId: streams.externalStreamId
     })
     .from(streams)
     .where(eq(streams.isLive, true))
@@ -289,7 +319,22 @@ export class DatabaseStorage implements IStorage {
       startedAt: streams.startedAt,
       endedAt: streams.endedAt,
       category: streams.category,
-      tags: streams.tags
+      tags: streams.tags,
+      streamType: streams.streamType,
+      protocol: streams.protocol,
+      useCamera: streams.useCamera,
+      useMicrophone: streams.useMicrophone,
+      useSystemAudio: streams.useSystemAudio,
+      hasVisualElement: streams.hasVisualElement,
+      visualElementType: streams.visualElementType,
+      visualElementUrl: streams.visualElementUrl,
+      hlsPlaylistUrl: streams.hlsPlaylistUrl,
+      hlsSegmentUrl: streams.hlsSegmentUrl,
+      hlsFolderPath: streams.hlsFolderPath,
+      hasRecording: streams.hasRecording,
+      recordingUrl: streams.recordingUrl,
+      peakViewerCount: streams.peakViewerCount,
+      externalStreamId: streams.externalStreamId
     })
     .from(streams)
     .where(eq(streams.userId, userId))
@@ -735,12 +780,16 @@ export class DatabaseStorage implements IStorage {
         id: users.id,
         username: users.username,
         password: users.password,
+        email: users.email,
         displayName: users.displayName,
         bio: users.bio,
         profileImageUrl: users.profileImageUrl,
         isStreaming: users.isStreaming,
         followerCount: users.followerCount,
-        createdAt: users.createdAt
+        createdAt: users.createdAt,
+        isVerified: users.isVerified,
+        verificationToken: users.verificationToken,
+        verificationTokenExpiry: users.verificationTokenExpiry
       })
       .from(users)
       .where(
@@ -773,7 +822,22 @@ export class DatabaseStorage implements IStorage {
         startedAt: streams.startedAt,
         endedAt: streams.endedAt,
         category: streams.category,
-        tags: streams.tags
+        tags: streams.tags,
+        streamType: streams.streamType,
+        protocol: streams.protocol,
+        useCamera: streams.useCamera,
+        useMicrophone: streams.useMicrophone,
+        useSystemAudio: streams.useSystemAudio,
+        hasVisualElement: streams.hasVisualElement,
+        visualElementType: streams.visualElementType,
+        visualElementUrl: streams.visualElementUrl,
+        hlsPlaylistUrl: streams.hlsPlaylistUrl,
+        hlsSegmentUrl: streams.hlsSegmentUrl,
+        hlsFolderPath: streams.hlsFolderPath,
+        hasRecording: streams.hasRecording,
+        recordingUrl: streams.recordingUrl,
+        peakViewerCount: streams.peakViewerCount,
+        externalStreamId: streams.externalStreamId
       })
       .from(streams)
       .where(

@@ -76,7 +76,8 @@ export const streams = pgTable("streams", {
   hlsFolderPath: text("hls_folder_path"), // Server-side folder where segments are stored
   hasRecording: boolean("has_recording").default(false), // Whether the stream has a VOD recording
   recordingUrl: text("recording_url"), // URL to the VOD recording if available
-  peakViewerCount: integer("peak_viewer_count").default(0) // Track peak concurrent viewers
+  peakViewerCount: integer("peak_viewer_count").default(0), // Track peak concurrent viewers
+  externalStreamId: text("external_stream_id") // For external streaming services like Cloudflare Stream
 });
 
 export const insertStreamSchema = createInsertSchema(streams).pick({
@@ -100,7 +101,8 @@ export const insertStreamSchema = createInsertSchema(streams).pick({
   hlsSegmentUrl: true,
   hlsFolderPath: true,
   hasRecording: true,
-  recordingUrl: true
+  recordingUrl: true,
+  externalStreamId: true
 });
 
 // Track model

@@ -1555,6 +1555,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
+  // Handle Cloudflare Stream started event
+  app.post("/api/streams/:streamId/started", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    
+    try {
+      const streamId = parseInt(req.params.streamId);
+      if (isNaN(streamId)) {
+        return res.status(400).json({ message: "Invalid stream ID" });
+      }
+      
+      const { cloudflareStreamId } = req.body;
+      
+      // Update the stream with Cloudflare Stream ID
+      const stream = await storage.updateStream(streamId, {
+        externalStreamId: cloudflareStreamId,
+        startedAt: new Date(),
+        isLive: true
+      });
+      
+      console.log(`Cloudflare Stream started with ID ${cloudflareStreamId} for stream ${streamId}`);
+      return res.json({ success: true, stream });
+    } catch (error) {
+      console.error("Error updating Cloudflare stream info:", error);
+      return res.status(500).json({ message: "Failed to update stream information" });
+    }
+  });
+  
   // HLS version of the webrtc stream creation endpoint
   app.post("/api/streams/hls", async (req, res) => {
     try {
