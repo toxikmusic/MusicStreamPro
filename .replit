@@ -61,4 +61,4 @@ waitForPort = 5000
 id = "module:web/languageServer:typescript-language-server"
 
 [objectStorage]
-defaultBucketID = "replit-objstore-99c3596b-bbda-4d1d-8308-5c774941150a"
+defaultBucketID = "replit-objstore-1ec3e9d4-7fb2-41a8-bed7-b003406132d1"
