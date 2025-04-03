@@ -1,0 +1,31 @@
+[deployment]
+run = "./deploy.sh"
+ignorePorts = false
+
+[deployment.healthCheck]
+path = "/health"
+interval = 5000
+timeout = 1000
+
+[nix]
+channel = "stable-22_11"
+
+[env]
+PORT = "3000"
+NODE_ENV = "production"
+
+[deployment.environment]
+NODE_ENV = "production"
+
+[languages]
+nodejs = "20.x"
+
+# Enable the dev server used during the development lifecycle
+[dev]
+port = 5000
+processBootTime = 5000
+
+[dev.sync]
+run = "npm run dev"
+fileWatch = true
+ignorePorts = false
