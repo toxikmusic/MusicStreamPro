@@ -10,7 +10,7 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Copy, ExternalLink, Mic, MicOff, Video, VideoOff, Send, Users, Monitor, Settings, Key, Globe } from "lucide-react";
+import { Copy, ExternalLink, Mic, MicOff, Video, VideoOff, Send, Users, Monitor, Settings, Key, Globe, Cloud } from "lucide-react";
 import { HLSStreamingSession } from "../lib/hlsStreaming";
 import { SaveStreamRecordingDialog } from "./streams/SaveStreamRecordingDialog";
 
@@ -34,7 +34,7 @@ const LiveStream = ({ initialStreamId, userId, userName }: LiveStreamProps) => {
   const [shareUrl, setShareUrl] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [viewerCount, setViewerCount] = useState(0);
-  const [streamProtocol, setStreamProtocol] = useState<"webrtc" | "hls">("webrtc"); // Default to WebRTC
+  const [streamProtocol, setStreamProtocol] = useState<"webrtc" | "hls" | "cloudflare">("webrtc"); // Default to WebRTC
   
   // Stream details
   const [streamDetails, setStreamDetails] = useState<{
@@ -68,6 +68,17 @@ const LiveStream = ({ initialStreamId, userId, userName }: LiveStreamProps) => {
   
   // HLS streaming session
   const hlsSessionRef = useRef<HLSStreamingSession | null>(null);
+  
+  // Cloudflare Stream reference
+  const cloudflareStreamRef = useRef<{ 
+    connection: RTCPeerConnection | null;
+    stream: MediaStream | null;
+    publishEndpoint: string | null; 
+  }>({ 
+    connection: null, 
+    stream: null,
+    publishEndpoint: 'https://customer-t2aair0gpwhh9qzs.cloudflarestream.com/2d1e4393576e30df428f1b48724df1e5k8926835a1f3442efddd27bf44a470b84/webRTC/publish' 
+  });
   
   // Chat states
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -265,12 +276,36 @@ const LiveStream = ({ initialStreamId, userId, userName }: LiveStreamProps) => {
               console.error("Error ending HLS stream during page unload:", error);
             }
           }
+        } else if (streamProtocol === "cloudflare") {
+          // Close Cloudflare Stream connection
+          try {
+            if (cloudflareStreamRef.current.connection) {
+              // Close the peer connection
+              cloudflareStreamRef.current.connection.close();
+              cloudflareStreamRef.current.connection = null;
+            }
+            
+            // Use fetch with keepalive to notify our server that the stream has ended
+            fetch(`/api/streams/${streamId}/end`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              keepalive: true
+            });
+          } catch (error) {
+            console.error("Error ending Cloudflare stream during page unload:", error);
+          }
         }
       }
       
       // Stop all media tracks
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach(track => track.stop());
+      }
+      
+      // Clean up Cloudflare stream tracks
+      if (cloudflareStreamRef.current.stream) {
+        cloudflareStreamRef.current.stream.getTracks().forEach(track => track.stop());
+        cloudflareStreamRef.current.stream = null;
       }
       
       // Clean up peer connections
@@ -830,6 +865,120 @@ const LiveStream = ({ initialStreamId, userId, userName }: LiveStreamProps) => {
             data: { streamId: streamData.streamId }
           }));
         }
+      } else if (streamProtocol === "cloudflare") {
+        // Create stream through our backend first to get ID and stream key
+        console.log("Creating Cloudflare Stream");
+        const response = await fetch(`${window.location.origin}/api/streams/cloudflare`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            userId,
+            userName: userName || 'Anonymous',
+            title: `${userName || 'Anonymous'}'s Stream`,
+            description: `Live stream by ${userName || 'Anonymous'}`,
+            createShareableUrl: true
+          })
+        });
+        
+        streamData = await response.json();
+        
+        if (!streamData.success) {
+          throw new Error(streamData.message || "Failed to create Cloudflare stream");
+        }
+        
+        // Generate shareable URL from the stream ID
+        const shareableUrl = `${window.location.origin}/stream/${streamData.streamId}`;
+        streamData.shareUrl = shareableUrl;
+        
+        // Setup a direct WebRTC connection to Cloudflare Stream
+        try {
+          // Create a peer connection with Cloudflare Stream
+          const cloudflarePC = new RTCPeerConnection({
+            iceServers: [
+              { urls: 'stun:stun.cloudflare.com:3478' },
+              { urls: 'stun:stun.l.google.com:19302' }
+            ]
+          });
+          
+          cloudflareStreamRef.current.connection = cloudflarePC;
+          cloudflareStreamRef.current.stream = stream;
+          
+          // Add all tracks from our media stream to the peer connection
+          stream.getTracks().forEach(track => {
+            cloudflarePC.addTrack(track, stream);
+          });
+          
+          // Create an offer to send to Cloudflare
+          const offer = await cloudflarePC.createOffer();
+          await cloudflarePC.setLocalDescription(offer);
+          
+          // Wait for ICE candidates (use a promise with timeout)
+          await new Promise<void>((resolve) => {
+            const checkIceGatheringState = () => {
+              if (cloudflarePC.iceGatheringState === 'complete') {
+                resolve();
+              } else {
+                setTimeout(checkIceGatheringState, 100);
+              }
+            };
+            
+            // Set a timeout to resolve the promise after 5 seconds
+            // even if ICE gathering is not complete
+            setTimeout(resolve, 5000);
+            
+            checkIceGatheringState();
+          });
+          
+          // Send the offer to Cloudflare Stream
+          const publishEndpoint = cloudflareStreamRef.current.publishEndpoint;
+          if (!publishEndpoint) {
+            throw new Error("Cloudflare Stream publishing endpoint not configured");
+          }
+          
+          const cloudflareResponse = await fetch(publishEndpoint, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              sdp: cloudflarePC.localDescription?.sdp,
+              clientId: streamData.streamId.toString()
+            })
+          });
+          
+          if (!cloudflareResponse.ok) {
+            throw new Error(`Cloudflare Stream error: ${cloudflareResponse.status} ${cloudflareResponse.statusText}`);
+          }
+          
+          // Get the SDP answer from Cloudflare
+          const cloudflareData = await cloudflareResponse.json();
+          
+          // Set the remote description from Cloudflare's answer
+          const answer = new RTCSessionDescription({
+            type: 'answer',
+            sdp: cloudflareData.sdp
+          });
+          
+          await cloudflarePC.setRemoteDescription(answer);
+          
+          console.log("Cloudflare Stream WebRTC connection established");
+          
+          // Notify our backend that stream started successfully
+          await fetch(`${window.location.origin}/api/streams/${streamData.streamId}/started`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              cloudflareStreamId: cloudflareData.streamId || 'unknown'
+            })
+          });
+        } catch (error) {
+          console.error("Error setting up Cloudflare Stream:", error);
+          throw new Error(`Failed to connect to Cloudflare Stream: ${(error as Error).message}`);
+        }
       } else if (streamProtocol === "hls") {
         // Create HLS stream
         console.log("Creating HLS stream");
@@ -999,6 +1148,44 @@ const LiveStream = ({ initialStreamId, userId, userName }: LiveStreamProps) => {
             }
             
             hlsSessionRef.current = null;
+          }
+        } else if (streamProtocol === "cloudflare") {
+          // End the Cloudflare Stream
+          console.log("Ending Cloudflare stream");
+          try {
+            // Close the WebRTC connection to Cloudflare
+            if (cloudflareStreamRef.current.connection) {
+              cloudflareStreamRef.current.connection.close();
+              cloudflareStreamRef.current.connection = null;
+            }
+            
+            // Notify our server the stream has ended
+            if (streamId) {
+              const response = await fetch(`${window.location.origin}/api/streams/${streamId}/end`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  protocol: 'cloudflare'
+                })
+              });
+              
+              // If the server indicated a recording is available, show the save dialog
+              const endResult = await response.json();
+              if (endResult.showSavePrompt && parseInt(streamId)) {
+                setRecordingStreamId(parseInt(streamId));
+                setTemporaryRecordingUrl(endResult.temporaryUrl);
+                setShowSaveRecordingDialog(true);
+              }
+            }
+          } catch (error) {
+            console.error("Error ending Cloudflare stream:", error);
+            toast({
+              title: "Error",
+              description: "Failed to properly end the Cloudflare stream",
+              variant: "destructive"
+            });
           }
         }
       } else if (mode === "viewer" && streamId) {
@@ -1464,6 +1651,56 @@ const LiveStream = ({ initialStreamId, userId, userName }: LiveStreamProps) => {
                         <Label htmlFor="system-source" className="cursor-pointer">
                           <Monitor className="h-4 w-4 inline mr-1" />
                           System Audio
+                        </Label>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="md:col-span-2">
+                    <Label className="text-xs mb-2 block">
+                      Streaming Protocol
+                    </Label>
+                    <div className="flex items-center justify-start space-x-4 mb-4">
+                      <div className="flex items-center space-x-2">
+                        <input 
+                          type="radio" 
+                          id="webrtc-protocol" 
+                          name="stream-protocol" 
+                          checked={streamProtocol === "webrtc"} 
+                          onChange={() => setStreamProtocol("webrtc")}
+                          disabled={isStreaming}
+                        />
+                        <Label htmlFor="webrtc-protocol" className="cursor-pointer">
+                          <Globe className="h-4 w-4 inline mr-1" />
+                          WebRTC (Low Latency)
+                        </Label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <input 
+                          type="radio" 
+                          id="hls-protocol" 
+                          name="stream-protocol" 
+                          checked={streamProtocol === "hls"} 
+                          onChange={() => setStreamProtocol("hls")}
+                          disabled={isStreaming}
+                        />
+                        <Label htmlFor="hls-protocol" className="cursor-pointer">
+                          <Video className="h-4 w-4 inline mr-1" />
+                          HLS (High Compatibility)
+                        </Label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <input 
+                          type="radio" 
+                          id="cloudflare-protocol" 
+                          name="stream-protocol" 
+                          checked={streamProtocol === "cloudflare"} 
+                          onChange={() => setStreamProtocol("cloudflare")}
+                          disabled={isStreaming}
+                        />
+                        <Label htmlFor="cloudflare-protocol" className="cursor-pointer">
+                          <Globe className="h-4 w-4 inline mr-1" />
+                          Cloudflare (Global CDN)
                         </Label>
                       </div>
                     </div>
