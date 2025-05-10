@@ -7,7 +7,6 @@ import { z } from 'zod';
 import { createStream } from '@/lib/api';
 import { Stream } from '@shared/schema';
 import { audioStreamingService, type StreamStatus } from '@/lib/audioStreaming';
-import { cloudflareStreamingService, type CloudflareStreamStatus } from '@/lib/cloudflareStreaming';
 import { useLocation } from 'wouter';
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -58,84 +57,21 @@ export default function GoLivePage() {
   const [frequencyData, setFrequencyData] = useState<Uint8Array | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [activeStreamId, setActiveStreamId] = useState<number | null>(null);
-  const [cloudflareApiVerified, setCloudflareApiVerified] = useState<boolean | null>(null);
-  const [cloudflareApiMessage, setCloudflareApiMessage] = useState<string>("");
   
   // For demo, a fixed userId (in real app would come from auth)
   const userId = user?.id || 1;
   
-  // Initialize audio streaming and Cloudflare streaming service when component mounts
-  // Check Cloudflare API credentials and secret status
+  // Initialize audio streaming when component mounts
   useEffect(() => {
-    const verifyCloudflareCredentials = async () => {
-      if (user) {
-        try {
-          // This will make the API call to verify the Cloudflare API key
-          const result = await cloudflareStreamingService.verifyCredentials();
-          setCloudflareApiVerified(result.success);
-          setCloudflareApiMessage(result.message);
-          
-          if (!result.success) {
-            console.warn("Cloudflare API credentials verification failed:", result.message);
-          } else {
-            console.log("Cloudflare API credentials verified successfully");
-          }
-        } catch (error) {
-          console.error("Error verifying Cloudflare credentials:", error);
-          setCloudflareApiVerified(false);
-          setCloudflareApiMessage("Failed to verify Cloudflare API credentials");
-        }
-      }
-    };
-    
-    // Check if we have the Cloudflare API key in our environment
-    verifyCloudflareCredentials();
-  }, [user]);
-  
-  // Check secrets when component mounts or when environment might change
-  useEffect(() => {
-    // @ts-ignore - This is a special function handled by the assistant
-    if (typeof check_secrets === 'function') {
-      // @ts-ignore
-      check_secrets(["CLOUDFLARE_API_KEY"])
-        .then((result: any) => {
-          // If the result object contains CLOUDFLARE_API_KEY and it's true,
-          // we have the secret, verify the credentials
-          if (result && result.CLOUDFLARE_API_KEY) {
-            // We have the key, so now check if it's valid by verifying credentials
-            cloudflareStreamingService.verifyCredentials()
-              .then(result => {
-                setCloudflareApiVerified(result.success);
-                setCloudflareApiMessage(result.message);
-              })
-              .catch(error => {
-                console.error("Error verifying credentials after key check:", error);
-                setCloudflareApiVerified(false);
-                setCloudflareApiMessage("API key found but verification failed");
-              });
-          } else {
-            // We don't have the key
-            setCloudflareApiVerified(false);
-            setCloudflareApiMessage("Cloudflare API key not found in environment");
-          }
-        })
-        .catch((error: any) => {
-          console.error("Error checking secrets:", error);
-        });
-    }
-  }, []);
-
-  useEffect(() => {
-    const initialize = async () => {
+    const initializeAudio = async () => {
       try {
-        // Initialize audio streaming
-        const audioResult = await audioStreamingService.initialize({
+        const result = await audioStreamingService.initialize({
           echoCancellation: false,
           noiseSuppression: false,
           autoGainControl: false
         });
         
-        if (audioResult) {
+        if (result) {
           setAudioInitialized(true);
           audioStreamingService.setVolume(volume);
           
@@ -153,29 +89,6 @@ export default function GoLivePage() {
             title: "Audio initialized",
             description: "Your microphone is ready for streaming.",
           });
-          
-          // Initialize Cloudflare streaming service
-          const cloudflareResult = await cloudflareStreamingService.initialize();
-          if (cloudflareResult) {
-            console.log("Cloudflare streaming service initialized");
-            
-            // Log available streaming URLs for debugging
-            const webRtcUrl = cloudflareStreamingService.getWebRtcUrl();
-            const rtmpsUrl = cloudflareStreamingService.getRtmpsUrl();
-            
-            console.log("Available WebRTC URL:", webRtcUrl);
-            console.log("Available RTMPS URL:", rtmpsUrl);
-            
-            // Choose the best URL to display (prefer WebRTC if available)
-            const bestUrl = webRtcUrl || rtmpsUrl;
-            if (bestUrl) {
-              // Mask the URL for security in the UI
-              setStreamKey("••••••••••••••••");
-            }
-          } else {
-            console.error("Failed to initialize Cloudflare streaming service");
-          }
-          
         } else {
           toast({
             title: "Audio initialization failed",
@@ -193,7 +106,7 @@ export default function GoLivePage() {
       }
     };
 
-    initialize();
+    initializeAudio();
     
     // Clean up resources when component unmounts
     return () => {
@@ -201,7 +114,6 @@ export default function GoLivePage() {
         audioStreamingService.stopStreaming();
       }
       audioStreamingService.dispose();
-      cloudflareStreamingService.dispose();
     };
   }, [toast, volume]);
 
@@ -285,42 +197,18 @@ export default function GoLivePage() {
     }
     
     try {
-      // First, ensure we have a Cloudflare stream key
-      const cloudflareResult = await cloudflareStreamingService.initialize();
-      if (!cloudflareResult) {
-        toast({
-          title: "Streaming setup failed",
-          description: "Could not initialize Cloudflare streaming. Please try again.",
-          variant: "destructive",
-        });
-        return;
-      }
+      // Generate a new stream key for demo
+      const newStreamKey = Math.random().toString(36).substring(2, 15);
+      setStreamKey(newStreamKey);
       
-      // First try to get the WebRTC URL (preferred for modern browsers)
-      const webRtcUrl = cloudflareStreamingService.getWebRtcUrl();
-      
-      // Fallback to RTMPS URL if WebRTC not available
-      const rtmpsUrl = cloudflareStreamingService.getRtmpsUrl();
-      
-      // Use the appropriate streaming URL (prefer WebRTC if available)
-      const streamUrl = webRtcUrl || rtmpsUrl;
-      
-      console.log("Using streaming URL:", streamUrl);
-      
-      // Display the stream key/URL in the UI (masked for security)
-      if (streamUrl) {
-        setStreamKey(streamUrl);
-      }
-      
-      // Start local audio streaming with the appropriate URL
-      const result = await audioStreamingService.startStreaming(streamId, streamUrl);
+      const result = await audioStreamingService.startStreaming(streamId, newStreamKey);
       
       if (result) {
         setIsStreaming(true);
         setActiveStreamId(streamId);
         toast({
           title: "Stream started",
-          description: "Your audio is now streaming live through Cloudflare.",
+          description: "Your audio is now streaming live.",
         });
       } else {
         toast({
@@ -341,16 +229,9 @@ export default function GoLivePage() {
   
   // Stop streaming function
   const stopStreaming = () => {
-    // Stop the local audio streaming
     audioStreamingService.stopStreaming();
-    
-    // Update UI states
     setIsStreaming(false);
     setActiveStreamId(null);
-    
-    // Reset stream key display for security
-    setStreamKey("••••••••••••••••");
-    
     toast({
       title: "Stream ended",
       description: "Your live stream has ended successfully.",
@@ -683,14 +564,11 @@ export default function GoLivePage() {
                       <h3 className="text-sm font-medium">Stream URL</h3>
                       <div className="mt-1 flex">
                         <Input 
-                          value="rtmps://live.cloudflare.com:443/live" 
+                          value="rtmp://beatstream.live/live" 
                           readOnly 
                           className="font-mono text-xs"
                         />
                       </div>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Powered by Cloudflare Streaming
-                      </p>
                     </div>
                     <div>
                       <h3 className="text-sm font-medium">Stream Key</h3>
@@ -711,53 +589,6 @@ export default function GoLivePage() {
                       </div>
                     </div>
                     
-                    {/* Cloudflare API Status Alert */}
-                    {cloudflareApiVerified !== null && (
-                      <Alert className={`mb-4 ${cloudflareApiVerified ? 'bg-green-50 dark:bg-green-950 text-green-900 dark:text-green-200' : 'bg-red-50 dark:bg-red-950 text-red-900 dark:text-red-200'}`}>
-                        <AlertCircle className={`h-4 w-4 ${cloudflareApiVerified ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`} />
-                        <AlertTitle>{cloudflareApiVerified ? 'Cloudflare API Connected' : 'Cloudflare API Error'}</AlertTitle>
-                        <AlertDescription>
-                          {cloudflareApiMessage || (cloudflareApiVerified 
-                            ? 'Cloudflare streaming API connection verified successfully.'
-                            : 'Unable to verify Cloudflare API key. Streaming features may be limited.')}
-                          
-                          {!cloudflareApiVerified && (
-                            <div className="mt-2">
-                              <Button 
-                                variant="outline" 
-                                size="sm"
-                                onClick={() => {
-                                  toast({
-                                    title: "Requesting API Key",
-                                    description: "You'll be prompted to enter your Cloudflare API key.",
-                                  });
-                                  
-                                  // Request the Cloudflare API key from the user
-                                  // This will show a dialog for the user to enter the API key
-                                  // @ts-ignore - This is a special function handled by the assistant
-                                  if (typeof ask_secrets === 'function') {
-                                    // @ts-ignore
-                                    ask_secrets(
-                                      ["CLOUDFLARE_API_KEY"], 
-                                      "BeatStream needs a Cloudflare API key to enable live streaming functionality. You can get this from your Cloudflare dashboard."
-                                    );
-                                  } else {
-                                    toast({
-                                      title: "API Key Required",
-                                      description: "Please contact your administrator to set up the Cloudflare API key.",
-                                      variant: "destructive"
-                                    });
-                                  }
-                                }}
-                              >
-                                Configure Cloudflare API Key
-                              </Button>
-                            </div>
-                          )}
-                        </AlertDescription>
-                      </Alert>
-                    )}
-
                     <Alert>
                       <AlertCircle className="h-4 w-4" />
                       <AlertTitle>Important</AlertTitle>

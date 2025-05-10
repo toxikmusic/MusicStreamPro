@@ -2,45 +2,10 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import path from "path";
-import { securityHeaders, rateLimiter, corsHandler } from "./middleware/security";
-import { errorHandler, notFoundHandler } from "./middleware/error-handler";
-
-// Validate critical environment variables in production
-function validateEnvironment() {
-  if (process.env.NODE_ENV !== 'production') return;
-  
-  const requiredVars = [
-    'SESSION_SECRET'
-  ];
-  
-  const missingVars = requiredVars.filter(varName => !process.env[varName]);
-  
-  if (missingVars.length > 0) {
-    console.error('CRITICAL ERROR: Missing required environment variables:');
-    missingVars.forEach(varName => console.error(`- ${varName}`));
-    console.error('Application may not function correctly without these variables.');
-  }
-}
-
-// Check environment variables
-validateEnvironment();
 
 const app = express();
-
-// CORS should be applied first
-app.use(corsHandler);
-
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
-
-// Apply security middleware in production
-if (process.env.NODE_ENV === 'production') {
-  app.use(securityHeaders);
-  app.use(rateLimiter);
-  console.log('Production security middleware enabled');
-} else {
-  console.log('Running in development mode - full security middleware disabled');
-}
 
 // Serve uploaded files
 app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
@@ -78,11 +43,13 @@ app.use((req, res, next) => {
 (async () => {
   const server = await registerRoutes(app);
 
-  // API routes that weren't matched (404 handler)
-  app.use('/api/*', notFoundHandler);
-  
-  // Global error handler (must be the last middleware)
-  app.use(errorHandler);
+  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+    const status = err.status || err.statusCode || 500;
+    const message = err.message || "Internal Server Error";
+
+    res.status(status).json({ message });
+    throw err;
+  });
 
   // importantly only setup vite in development and after
   // setting up all the other routes so the catch-all route

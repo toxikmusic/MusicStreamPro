@@ -2,7 +2,6 @@ import type { Express, Request } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { z } from "zod";
-import axios from "axios";
 import { 
   insertUserSchema, 
   insertStreamSchema, 
@@ -59,160 +58,7 @@ const upload = multer({
   }
 });
 
-// Utility function to check if we're in production mode
-function isProduction(): boolean {
-  return process.env.NODE_ENV === 'production';
-}
-
-// Middleware to block test routes in production
-function blockTestRoutesInProduction(req: Request, res: any, next: Function) {
-  if (isProduction() || process.env.DISABLE_TEST_ROUTES === 'true') {
-    if (req.path.startsWith('/api/test') || req.path.includes('/test/')) {
-      console.warn(`[SECURITY] Blocked access to test endpoint in production: ${req.path}`);
-      return res.status(404).json({ error: 'Endpoint not found' });
-    }
-  }
-  next();
-}
-
-/**
- * Validates storage health by performing a basic operation
- */
-async function checkStorageHealth(): Promise<{healthy: boolean, details?: string}> {
-  try {
-    // Attempt to get users as a basic check
-    await storage.getAllUsers();
-    return { healthy: true };
-  } catch (error) {
-    return { 
-      healthy: false, 
-      details: isProduction() ? "Storage service unavailable" : String(error)
-    };
-  }
-}
-
-/**
- * Checks Cloudflare integration health if configured
- */
-async function checkCloudflareHealth(): Promise<{healthy: boolean, details?: string, configured: boolean}> {
-  // Skip check if API key not configured
-  if (!process.env.CLOUDFLARE_API_KEY) {
-    return { healthy: false, configured: false };
-  }
-  
-  try {
-    // Basic check to verify API connectivity
-    const response = await axios({
-      method: 'GET',
-      url: 'https://api.cloudflare.com/client/v4/user/tokens/verify',
-      headers: {
-        'Authorization': `Bearer ${process.env.CLOUDFLARE_API_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      timeout: 3000 // 3 second timeout
-    });
-    
-    if (response.data && response.data.success) {
-      return { healthy: true, configured: true };
-    } else {
-      return { 
-        healthy: false, 
-        configured: true,
-        details: isProduction() ? "Cloudflare API response invalid" : JSON.stringify(response.data)
-      };
-    }
-  } catch (error) {
-    return { 
-      healthy: false, 
-      configured: true,
-      details: isProduction() ? "Cloudflare API unavailable" : String(error)
-    };
-  }
-}
-
 export async function registerRoutes(app: Express): Promise<Server> {
-  // Basic health check endpoint (useful for load balancers, monitoring tools)
-  app.get('/health', (req, res) => {
-    const dbStatus = storage ? 'connected' : 'disconnected';
-    
-    res.status(200).json({ 
-      status: 'ok',
-      environment: process.env.NODE_ENV || 'development',
-      timestamp: new Date().toISOString(),
-      uptime: process.uptime(),
-      version: process.env.npm_package_version || 'unknown',
-      database: dbStatus
-    });
-  });
-  
-  // Detailed health check endpoint for monitoring systems
-  app.get('/api/health/detailed', async (req, res) => {
-    try {
-      // Run storage health check
-      const storageHealth = await checkStorageHealth();
-      
-      // Run Cloudflare health check if available
-      const cloudflareHealth = await checkCloudflareHealth();
-      
-      // Memory usage information
-      const memoryUsage = process.memoryUsage();
-      
-      // Create response with detailed health information
-      const healthData = {
-        status: storageHealth.healthy ? 'healthy' : 'degraded',
-        timestamp: new Date().toISOString(),
-        uptime: process.uptime(),
-        version: process.env.npm_package_version || '1.0.0',
-        environment: process.env.NODE_ENV || 'development',
-        services: {
-          storage: {
-            status: storageHealth.healthy ? 'healthy' : 'failing',
-            details: storageHealth.details
-          },
-          cloudflare: {
-            status: cloudflareHealth.healthy ? 'healthy' : 'failing',
-            configured: cloudflareHealth.configured,
-            details: cloudflareHealth.details
-          }
-        },
-        system: {
-          memoryUsage: {
-            rss: Math.round(memoryUsage.rss / 1024 / 1024) + ' MB',
-            heapTotal: Math.round(memoryUsage.heapTotal / 1024 / 1024) + ' MB',
-            heapUsed: Math.round(memoryUsage.heapUsed / 1024 / 1024) + ' MB',
-            external: Math.round(memoryUsage.external / 1024 / 1024) + ' MB',
-          },
-          cpuUsage: process.cpuUsage()
-        }
-      };
-      
-      // Return appropriate status code based on health
-      const statusCode = storageHealth.healthy ? 200 : 503;
-      
-      res.status(statusCode).json(healthData);
-    } catch (error) {
-      console.error('Health check error:', error);
-      res.status(500).json({ 
-        status: 'error',
-        timestamp: new Date().toISOString(),
-        message: 'Error performing health check',
-        details: isProduction() ? undefined : String(error)
-      });
-    }
-  });
-  
-  // Add version endpoint for monitoring deploys
-  app.get('/api/version', (req, res) => {
-    res.status(200).json({
-      version: process.env.npm_package_version || '1.0.0',
-      environment: process.env.NODE_ENV || 'development',
-      builtAt: process.env.BUILD_DATE || new Date().toISOString()
-    });
-  });
-
-  // Apply middleware to block test routes in production
-  app.use(blockTestRoutesInProduction);
-  
   // Setup auth routes with Passport
   setupAuth(app);
   
@@ -306,74 +152,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Invalid stream data", errors: error.errors });
       }
       res.status(500).json({ message: "Error creating stream" });
-    }
-  });
-  
-  // Cloudflare Streaming Integration
-  app.get("/api/cloudflare/stream-key", async (req, res) => {
-    if (!req.isAuthenticated()) {
-      return res.status(401).json({ message: "Unauthorized" });
-    }
-    
-    try {
-      const cloudflareApiKey = process.env.CLOUDFLARE_API_KEY;
-      if (!cloudflareApiKey) {
-        return res.status(500).json({ message: "Cloudflare API key not configured" });
-      }
-      
-      // Use the provided Cloudflare stream key credentials
-      // In this demo, we're using fixed values, but in production this would be an API call
-      const streamKey = "8926835a1f3442efddd27bf44a470b84";
-      const rtmpsKey = "5ef3c9db080854c80da02145fbf610cfk8926835a1f3442efddd27bf44a470b84";
-      const playbackKey = "a495c263e5e367e02d0ac62bd3af677ek8926835a1f3442efddd27bf44a470b84";
-      const webRtcUrl = "https://customer-t2aair0gpwhh9qzs.cloudflarestream.com/2d1e4393576e30df428f1b48724df1e5k8926835a1f3442efddd27bf44a470b84/webRTC/publish";
-      const webRtcPlayUrl = "https://customer-t2aair0gpwhh9qzs.cloudflarestream.com/8926835a1f3442efddd27bf44a470b84/webRTC/play";
-      
-      res.json({
-        streamKey,
-        rtmpsKey,
-        rtmpsUrl: 'rtmps://live.cloudflare.com:443/live/',
-        playbackKey,
-        playbackUrl: `https://customer-t2aair0gpwhh9qzs.cloudflarestream.com/${streamKey}/manifest/video.m3u8`,
-        webRtcUrl,
-        webRtcPlayUrl,
-        accountId: "3a06d651436a9ee739480875effc1a2f"
-      });
-    } catch (error) {
-      console.error("Error fetching Cloudflare stream key:", error);
-      res.status(500).json({ message: "Error fetching stream key" });
-    }
-  });
-  
-  // Test endpoint for Cloudflare stream key (remove in production)
-  app.get("/api/test/cloudflare/stream-key", async (req, res) => {
-    try {
-      const cloudflareApiKey = process.env.CLOUDFLARE_API_KEY;
-      if (!cloudflareApiKey) {
-        return res.status(500).json({ message: "Cloudflare API key not configured" });
-      }
-      
-      // Return our actual configured Cloudflare streaming credentials
-      // These are used for testing without requiring authentication
-      const streamKey = "8926835a1f3442efddd27bf44a470b84";
-      const rtmpsKey = "5ef3c9db080854c80da02145fbf610cfk8926835a1f3442efddd27bf44a470b84";
-      const playbackKey = "a495c263e5e367e02d0ac62bd3af677ek8926835a1f3442efddd27bf44a470b84";
-      const webRtcUrl = "https://customer-t2aair0gpwhh9qzs.cloudflarestream.com/2d1e4393576e30df428f1b48724df1e5k8926835a1f3442efddd27bf44a470b84/webRTC/publish";
-      const webRtcPlayUrl = "https://customer-t2aair0gpwhh9qzs.cloudflarestream.com/8926835a1f3442efddd27bf44a470b84/webRTC/play";
-      
-      res.json({
-        streamKey,
-        rtmpsKey,
-        rtmpsUrl: 'rtmps://live.cloudflare.com:443/live/',
-        playbackKey,
-        playbackUrl: `https://customer-t2aair0gpwhh9qzs.cloudflarestream.com/${streamKey}/manifest/video.m3u8`,
-        webRtcUrl,
-        webRtcPlayUrl,
-        accountId: "3a06d651436a9ee739480875effc1a2f"
-      });
-    } catch (error) {
-      console.error("Error fetching Cloudflare stream key:", error);
-      res.status(500).json({ message: "Error fetching stream key" });
     }
   });
   
@@ -970,99 +748,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const creators = await storage.getRecommendedCreators();
     res.json(creators);
   });
-  
-  // Cloudflare API test endpoint - protected route
-  // Test Cloudflare API endpoint with enhanced security for production
-  app.get("/api/admin/test-cloudflare", blockTestRoutesInProduction, async (req, res) => {
-    // Ensure user is authenticated
-    if (!req.isAuthenticated()) {
-      return res.status(401).json({ 
-        success: false, 
-        message: "Authentication required"
-      });
-    }
-    
-    // In production, require additional admin role check
-    if (isProduction()) {
-      // For this demo app, we're simply checking for a specific user ID that we consider an admin
-      // In a real application, you would have a proper role-based access control system
-      const isAdmin = req.user?.id === 1; // User ID 1 is considered admin in our test data
-      
-      if (!isAdmin) {
-        console.warn(`[SECURITY] Non-admin user ${req.user?.id} attempted to access admin endpoint`);
-        return res.status(403).json({
-          success: false,
-          message: "Admin access required for this endpoint"
-        });
-      }
-    }
-    
-    try {
-      // Check if we have Cloudflare API key
-      const apiKey = process.env.CLOUDFLARE_API_KEY;
-      
-      if (!apiKey) {
-        return res.status(400).json({
-          success: false,
-          message: "Cloudflare API key not found in environment variables"
-        });
-      }
-      
-      // Add request timeout for security
-      const cancelTokenSource = axios.CancelToken.source();
-      const timeout = setTimeout(() => {
-        cancelTokenSource.cancel('Request timeout');
-      }, 5000); // 5 second timeout
-      
-      try {
-        // Simple test request to Cloudflare API
-        const response = await axios({
-          method: 'GET',
-          url: 'https://api.cloudflare.com/client/v4/user/tokens/verify',
-          headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json'
-          },
-          cancelToken: cancelTokenSource.token
-        });
-        
-        // Clear the timeout
-        clearTimeout(timeout);
-        
-        // Log successful verification without exposing sensitive data
-        console.log(`Cloudflare API key verified successfully for user ${req.user?.id}`);
-        
-        // In production, don't expose API details in response
-        const responseData = isProduction() 
-          ? { success: true, message: "Cloudflare API key is valid" }
-          : { 
-              success: true, 
-              message: "Cloudflare API key is valid",
-              details: response.data
-            };
-            
-        return res.status(200).json(responseData);
-      } finally {
-        clearTimeout(timeout);
-      }
-    } catch (error: any) {
-      console.error("Cloudflare API test failed:", error);
-      
-      // Sanitize error messages in production
-      const errorMessage = isProduction()
-        ? "Failed to verify Cloudflare API key"
-        : error.response?.data?.message || error.message || "Unknown error";
-      
-      return res.status(500).json({
-        success: false,
-        message: "Failed to verify Cloudflare API key",
-        ...(isProduction() ? {} : { 
-          error: errorMessage,
-          details: error.response?.data
-        })
-      });
-    }
-  });
 
   const httpServer = createServer(app);
   
@@ -1304,14 +989,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     // Set up connection based on role
     if (isBroadcaster) {
       // If there's already a broadcaster, reject this connection
-      if (audioConnections.broadcaster && 
-          audioConnections.broadcaster.readyState === WebSocket.OPEN) {
+      if (streamConnections.broadcaster && 
+          streamConnections.broadcaster.readyState === WebSocket.OPEN) {
         ws.close(1008, 'Stream already has a broadcaster');
         return;
       }
       
       log(`Broadcaster connected for stream ${streamId}`, 'websocket');
-      audioConnections.broadcaster = ws;
+      streamConnections.broadcaster = ws;
       
       // Update stream status to live
       storage.updateStream(streamId, { isLive: true }).catch(err => {
@@ -1328,7 +1013,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             // Handle audio level updates
             if (controlMessage.type === 'audio_level' && typeof controlMessage.level === 'number') {
               // Broadcast audio level to all listeners
-              audioConnections.listeners.forEach((listener: WebSocket) => {
+              streamConnections.listeners.forEach(listener => {
                 if (listener.readyState === WebSocket.OPEN) {
                   try {
                     listener.send(JSON.stringify({
@@ -1370,7 +1055,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         } else {
           // This is binary audio data
           // Broadcast audio data to all listeners
-          audioConnections.listeners.forEach((listener: WebSocket) => {
+          streamConnections.listeners.forEach(listener => {
             if (listener.readyState === WebSocket.OPEN) {
               try {
                 listener.send(data);
@@ -1385,7 +1070,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Handle broadcaster disconnection
       ws.on('close', () => {
         log(`Broadcaster disconnected for stream ${streamId}`, 'websocket');
-        audioConnections.broadcaster = null;
+        streamConnections.broadcaster = null;
         
         // Update stream status to not live
         storage.updateStream(streamId, { isLive: false }).catch(err => {
@@ -1393,7 +1078,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
         
         // Notify all listeners that the stream ended
-        audioConnections.listeners.forEach((listener: WebSocket) => {
+        streamConnections.listeners.forEach(listener => {
           if (listener.readyState === WebSocket.OPEN) {
             try {
               // Send an empty buffer or end signal
@@ -1405,24 +1090,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
         
         // Clean up if no more connections
-        if (audioConnections.listeners.size === 0) {
+        if (streamConnections.listeners.size === 0) {
           audioStreamConnections.delete(streamId);
         }
       });
     } else {
       // This is a listener
       log(`Listener connected for stream ${streamId}`, 'websocket');
-      audioConnections.listeners.add(ws);
+      streamConnections.listeners.add(ws);
       
       // Handle listener disconnection
       ws.on('close', () => {
         log(`Listener disconnected from stream ${streamId}`, 'websocket');
-        audioConnections.listeners.delete(ws);
+        streamConnections.listeners.delete(ws);
         
         // Clean up if no more connections and no broadcaster
-        if (audioConnections.listeners.size === 0 && 
-            (!audioConnections.broadcaster || 
-             audioConnections.broadcaster.readyState !== WebSocket.OPEN)) {
+        if (streamConnections.listeners.size === 0 && 
+            (!streamConnections.broadcaster || 
+             streamConnections.broadcaster.readyState !== WebSocket.OPEN)) {
           audioStreamConnections.delete(streamId);
         }
       });
@@ -1441,12 +1126,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(404).json({ message: "Stream not found" });
     }
     
-    const audioConnections = audioStreamConnections.get(streamId);
+    const streamConnections = audioStreamConnections.get(streamId);
     const isLive = stream.isLive && 
-                  audioConnections?.broadcaster && 
-                  audioConnections.broadcaster.readyState === WebSocket.OPEN;
+                  streamConnections?.broadcaster && 
+                  streamConnections.broadcaster.readyState === WebSocket.OPEN;
     
-    const viewerCount = audioConnections?.listeners.size || 0;
+    const viewerCount = streamConnections?.listeners.size || 0;
     
     res.json({
       id: streamId,
@@ -1482,7 +1167,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     // Notify all connected chat clients
     const connections = streamConnections.get(streamId);
     if (connections) {
-      connections.forEach((client: WebSocket) => {
+      connections.forEach(client => {
         if (client.readyState === WebSocket.OPEN) {
           client.send(JSON.stringify({
             type: 'stream_status',
@@ -1502,7 +1187,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       // Close all listener connections
-      audioConnections.listeners.forEach((listener: WebSocket) => {
+      audioConnections.listeners.forEach(listener => {
         if (listener.readyState === WebSocket.OPEN) {
           listener.close(1000, 'Stream ended by user');
         }
@@ -1518,9 +1203,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     
     res.json({ success: true });
   });
-  
-  // Cloudflare API test endpoint is implemented above (line ~865)
-  // This duplicate was removed to prevent route conflicts
 
   return httpServer;
 }
