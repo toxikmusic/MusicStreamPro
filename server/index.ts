@@ -69,7 +69,7 @@ app.use((req, res, next) => {
 
   // Serve the app on configured port or fallback to 5000
   // this serves both the API and the client
-  const port = parseInt(process.env.PORT || "5000", 10);
+  const port = parseInt(process.env.PORT || "3000", 10);
   
   // Always use 0.0.0.0 to listen on all interfaces
   server.listen(port, "0.0.0.0", () => {
